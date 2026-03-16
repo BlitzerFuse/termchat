@@ -28,7 +28,7 @@ int init_listener(int port) {
     return sock;
 }
 
-int accept_connection(int listener_fd, char *peer_ip, char *peer_nick) {
+int accept_connection(int listener_fd, char *peer_ip, char *peer_nick, char *peer_pass) {
     struct sockaddr_in addr;
     socklen_t len = sizeof(addr);
     int conn = accept(listener_fd, (struct sockaddr *)&addr, &len);
@@ -41,7 +41,8 @@ int accept_connection(int listener_fd, char *peer_ip, char *peer_nick) {
         close(conn);
         return -1;
     }
-    if (peer_nick) strncpy(peer_nick, p.sender, MAX_NAME - 1);
+    if (peer_nick) strncpy(peer_nick, p.sender,   MAX_NAME - 1);
+    if (peer_pass) strncpy(peer_pass, p.password, MAX_PASS - 1);
 
     return conn;
 }
@@ -58,7 +59,14 @@ int send_conn_reject(int sock_fd) {
     return 0;
 }
 
-int connect_to_peer(const char *ip, int port, const char *my_nickname) {
+int send_conn_wrong_pass(int sock_fd) {
+    Packet p = { .type = CONN_WRONG_PASS };
+    send(sock_fd, &p, sizeof(Packet), 0);
+    close(sock_fd);
+    return 0;
+}
+
+int connect_to_peer(const char *ip, int port, const char *my_nickname, const char *password) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) { perror("socket"); return -1; }
 
@@ -72,24 +80,22 @@ int connect_to_peer(const char *ip, int port, const char *my_nickname) {
         perror("connect"); close(sock); return -1;
     }
 
-    /* Send connection request with our nickname */
+    /* Send connection request with nickname and password */
     Packet req = { .type = CONN_REQUEST };
-    strncpy(req.sender, my_nickname, MAX_NAME - 1);
+    strncpy(req.sender,   my_nickname, MAX_NAME - 1);
+    strncpy(req.password, password ? password : "", MAX_PASS - 1);
     if (send(sock, &req, sizeof(Packet), 0) <= 0) {
         close(sock); return -1;
     }
 
-    /* Wait for accept or reject */
+    /* Wait for response */
     Packet resp;
     if (recv(sock, &resp, sizeof(Packet), 0) <= 0) {
         close(sock); return -1;
     }
-    if (resp.type == CONN_REJECT) {
-        close(sock); return -2;  /* -2 = explicitly rejected */
-    }
-    if (resp.type != CONN_ACCEPT) {
-        close(sock); return -1;
-    }
+    if (resp.type == CONN_WRONG_PASS) { close(sock); return -3; }
+    if (resp.type == CONN_REJECT)     { close(sock); return -2; }
+    if (resp.type != CONN_ACCEPT)     { close(sock); return -1; }
 
     return sock;
 }

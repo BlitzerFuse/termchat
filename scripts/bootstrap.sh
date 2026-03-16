@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-REPO="git@github.com:BlitzerFuse/termchat.git"
-DIR="$HOME/termchat"
+REPO="git@github.com:BlitzerFuse/termchan.git"
+DIR="$HOME/termchan/"
 BIN_DIR="$HOME/bin"
 
 install_pkg() {
@@ -45,7 +45,7 @@ fi
 make -C "$DIR"
 
 mkdir -p "$BIN_DIR"
-cp "$DIR/termchat" "$BIN_DIR/"
+cp "$DIR/termchan" "$BIN_DIR/"
 grep -qF 'export PATH="$HOME/bin:$PATH"' ~/.bashrc ||
   echo 'export PATH="$HOME/bin:$PATH"' >>~/.bashrc
 

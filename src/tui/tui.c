@@ -8,6 +8,10 @@
 #include <signal.h>
 #include <pthread.h>
 
+/* password charset: A-Z + 0-9 */
+static const char PASS_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+#define PASS_LEN 6
+
 static WINDOW *msg_win;
 static WINDOW *input_win;
 static char    prompt[MAX_NAME + 8];
@@ -116,7 +120,7 @@ int tui_menu(MenuResult *out) {
     /* draw static chrome */
     werase(w);
     box(w, 0, 0);
-    mvwprintw(w, 1, (bw - 8) / 2, "term-chan");
+    mvwprintw(w, 1, (bw - 8) / 2, "termchat");
     mvwhline(w, 2, 1, ACS_HLINE, bw - 2);
     mvwprintw(w, 3, 2, "Your IP : %s", local_ip);
     mvwprintw(w, 4, 2, "Port    : 5000");
@@ -159,11 +163,63 @@ mode_done:
     out->mode = (mode_sel == 0) ? MODE_LISTEN : MODE_CONNECT;
 
     if (out->mode == MODE_LISTEN) {
-        /* Start the discovery responder immediately — before we block on
-           accept_connection — so any peer that scans while we're on the
-           waiting screen gets a reply.  The thread is detached; it will
-           exit on its own once the TCP connection is established and
-           main() closes the process, or on any recvfrom error. */
+        /* ── password setup ── */
+        mvwhline(w, 10, 1, ACS_HLINE, bw - 2);
+        mvwprintw(w, 11, 2, "Password protect this session?");
+
+        int pw_sel = 0; /* 0=None, 1=Auto, 2=Custom */
+        while (1) {
+            if (pw_sel == 0) wattron(w, A_REVERSE);
+            mvwprintw(w, 12, 4, " None  ");
+            if (pw_sel == 0) wattroff(w, A_REVERSE);
+            if (pw_sel == 1) wattron(w, A_REVERSE);
+            mvwprintw(w, 12, 13, " Auto-generate ");
+            if (pw_sel == 1) wattroff(w, A_REVERSE);
+            if (pw_sel == 2) wattron(w, A_REVERSE);
+            mvwprintw(w, 12, 30, " Set manually ");
+            if (pw_sel == 2) wattroff(w, A_REVERSE);
+            wrefresh(w);
+
+            int ch = wgetch(w);
+            switch (ch) {
+                case KEY_LEFT:  if (pw_sel > 0) pw_sel--; break;
+                case KEY_RIGHT: if (pw_sel < 2) pw_sel++; break;
+                case '\t':      pw_sel = (pw_sel + 1) % 3; break;
+                case '\n': case '\r': goto pw_done;
+                case KEY_RESIZE: goto abort;
+                case 'q': case 27: goto abort;
+            }
+        }
+pw_done:
+        if (pw_sel == 0) {
+            out->password[0] = '\0'; /* no password */
+        } else if (pw_sel == 1) {
+            /* auto-generate */
+            srand((unsigned)time(NULL));
+            for (int i = 0; i < PASS_LEN; i++)
+                out->password[i] = PASS_CHARS[rand() % (sizeof(PASS_CHARS) - 1)];
+            out->password[PASS_LEN] = '\0';
+            mvwprintw(w, 13, 2, "Password: %s  (share this)", out->password);
+            mvwprintw(w, 14, 2, "Press Enter to continue...");
+            wrefresh(w);
+            wgetch(w);
+        } else {
+            /* manual entry */
+            mvwprintw(w, 13, 2, "Enter password (6 chars, A-Z 0-9): ");
+            echo(); curs_set(1);
+            wmove(w, 13, 38);
+            char tmp[MAX_PASS] = {0};
+            wgetnstr(w, tmp, PASS_LEN);
+            noecho(); curs_set(0);
+            /* force uppercase */
+            for (int i = 0; tmp[i]; i++)
+                out->password[i] = (tmp[i] >= 'a' && tmp[i] <= 'z')
+                                   ? tmp[i] - 32 : tmp[i];
+            out->password[PASS_LEN] = '\0';
+            if (!out->password[0]) out->password[0] = '\0';
+        }
+
+        /* Start the discovery responder */
         pthread_t disc_tid;
         pthread_create(&disc_tid, NULL,
                        tui_menu_disc_thread, out->nickname);
@@ -245,6 +301,49 @@ abort:
     return -1;
 }
 
+/* ── password entry screen (connector side) ─────────────── */
+
+const char *tui_enter_password(const char *peer_nick, const char *peer_ip) {
+    static char entered[MAX_PASS];
+    memset(entered, 0, sizeof(entered));
+
+    clear();
+    refresh();
+
+    const int bw = 50, bh = 9;
+    int bx = (COLS  - bw) / 2;
+    int by = (LINES - bh) / 2;
+    if (bx < 0) bx = 0;
+    if (by < 0) by = 0;
+
+    WINDOW *w = newwin(bh, bw, by, bx);
+    keypad(w, TRUE);
+
+    werase(w);
+    box(w, 0, 0);
+    mvwprintw(w, 1, (bw - 22) / 2, "Password Required");
+    mvwhline(w, 2, 1, ACS_HLINE, bw - 2);
+    mvwprintw(w, 3, 2, "User : %s", peer_nick);
+    mvwprintw(w, 4, 2, "IP   : %s", peer_ip);
+    mvwhline(w, 5, 1, ACS_HLINE, bw - 2);
+    mvwprintw(w, 6, 2, "Password: ");
+    wrefresh(w);
+
+    echo(); curs_set(1);
+    wmove(w, 6, 12);
+    wgetnstr(w, entered, PASS_LEN);
+    noecho(); curs_set(0);
+
+    /* force uppercase */
+    for (int i = 0; entered[i]; i++)
+        if (entered[i] >= 'a' && entered[i] <= 'z') entered[i] -= 32;
+
+    delwin(w);
+    clear();
+    refresh();
+    return entered;
+}
+
 /* ── accept / reject screen ─────────────────────────────── */
 
 int tui_accept_request(const char *peer_nick, const char *peer_ip) {
@@ -301,16 +400,13 @@ done:
 
 /* ── waiting screen ─────────────────────────────────────── */
 
-void tui_waiting(int port) {
+void tui_waiting(int port, const char *password) {
     clear();
     int cy = LINES / 2;
     int cx = (COLS - 40) / 2;
     if (cx < 0) cx = 0;
 
-    /* Use ncurses ACS line-drawing so box chars render correctly on all
-       terminals regardless of locale/encoding — raw UTF-8 in mvprintw
-       produces garbled output like ~T~@ on many setups. */
-    const int w = 38; /* interior width */
+    const int w = 38;
 
     /* top border */
     mvaddch(cy - 1, cx,         ACS_ULCORNER);
@@ -324,15 +420,26 @@ void tui_waiting(int port) {
     mvprintw(cy, cx + 1, "%-*s", w, line1);
     mvaddch(cy, cx + w + 1, ACS_VLINE);
 
-    /* row 2: cancel hint */
-    mvaddch(cy + 1, cx,         ACS_VLINE);
-    mvprintw(cy + 1, cx + 1, "%-*s", w, "  Press Ctrl-C to cancel");
+    /* row 2: password or no-password hint */
+    mvaddch(cy + 1, cx, ACS_VLINE);
+    if (password && password[0]) {
+        char pw_line[40];
+        snprintf(pw_line, sizeof(pw_line), "  Password: %s", password);
+        mvprintw(cy + 1, cx + 1, "%-*s", w, pw_line);
+    } else {
+        mvprintw(cy + 1, cx + 1, "%-*s", w, "  No password set");
+    }
     mvaddch(cy + 1, cx + w + 1, ACS_VLINE);
 
+    /* row 3: cancel hint */
+    mvaddch(cy + 2, cx,         ACS_VLINE);
+    mvprintw(cy + 2, cx + 1, "%-*s", w, "  Press Ctrl-C to cancel");
+    mvaddch(cy + 2, cx + w + 1, ACS_VLINE);
+
     /* bottom border */
-    mvaddch(cy + 2, cx,         ACS_LLCORNER);
-    mvhline(cy + 2, cx + 1,     ACS_HLINE, w);
-    mvaddch(cy + 2, cx + w + 1, ACS_LRCORNER);
+    mvaddch(cy + 3, cx,         ACS_LLCORNER);
+    mvhline(cy + 3, cx + 1,     ACS_HLINE, w);
+    mvaddch(cy + 3, cx + w + 1, ACS_LRCORNER);
 
     refresh();
 }

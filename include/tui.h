@@ -15,6 +15,10 @@ typedef struct {
    Returns -1 on abort (ncurses shut down). */
 int   tui_menu(MenuResult *out);
 
+/* Show accept/reject screen when a peer requests to connect.
+   Returns 1 if accepted, 0 if rejected. */
+int   tui_accept_request(const char *peer_nick, const char *peer_ip);
+
 /* Show a "waiting for connection" screen. Ncurses must already be running. */
 void  tui_waiting(int port);
 

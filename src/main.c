@@ -1,6 +1,7 @@
 #include "chat.h"
 #include "network.h"
 #include "tui.h"
+#include "protocol.h"
 #include <pthread.h>
 #include <unistd.h>
 #include <ncurses.h>
@@ -21,15 +22,32 @@ int main(void) {
             return 1;
         }
 
-        tui_waiting(DEFAULT_PORT);
+        /* Keep accepting and potentially rejecting until someone is accepted */
+        while (1) {
+            tui_waiting(DEFAULT_PORT);
 
-        char peer_ip[64] = {0};
-        sock_fd = accept_connection(listener, peer_ip);
+            char peer_ip[64]   = {0};
+            char peer_nick[MAX_NAME] = {0};
+            sock_fd = accept_connection(listener, peer_ip, peer_nick);
+            if (sock_fd < 0) { endwin(); close(listener); return 1; }
+
+            if (tui_accept_request(peer_nick, peer_ip)) {
+                send_conn_accept(sock_fd);
+                break;  /* accepted — proceed to chat */
+            } else {
+                send_conn_reject(sock_fd);  /* closes sock_fd internally */
+                /* loop back and wait for next connection */
+            }
+        }
         close(listener);
-        if (sock_fd < 0) { endwin(); return 1; }
 
     } else {
-        sock_fd = connect_to_peer(menu.peer_ip, DEFAULT_PORT);
+        sock_fd = connect_to_peer(menu.peer_ip, DEFAULT_PORT, menu.nickname);
+        if (sock_fd == -2) {
+            endwin();
+            fprintf(stderr, "Connection was rejected by the peer.\n");
+            return 1;
+        }
         if (sock_fd < 0) { endwin(); return 1; }
     }
 

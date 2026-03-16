@@ -245,6 +245,60 @@ abort:
     return -1;
 }
 
+/* ── accept / reject screen ─────────────────────────────── */
+
+int tui_accept_request(const char *peer_nick, const char *peer_ip) {
+    clear();
+    refresh();
+
+    const int bw = 50, bh = 10;
+    int bx = (COLS  - bw) / 2;
+    int by = (LINES - bh) / 2;
+    if (bx < 0) bx = 0;
+    if (by < 0) by = 0;
+
+    WINDOW *w = newwin(bh, bw, by, bx);
+    keypad(w, TRUE);
+
+    int sel = 1; /* default to Accept */
+
+    while (1) {
+        werase(w);
+        box(w, 0, 0);
+        mvwprintw(w, 1, (bw - 20) / 2, "Incoming Connection");
+        mvwhline(w, 2, 1, ACS_HLINE, bw - 2);
+        mvwprintw(w, 3, 2, "User : %s", peer_nick);
+        mvwprintw(w, 4, 2, "IP   : %s", peer_ip);
+        mvwhline(w, 5, 1, ACS_HLINE, bw - 2);
+        mvwprintw(w, 6, 2, "Accept this connection?");
+
+        if (sel == 0) wattron(w, A_REVERSE);
+        mvwprintw(w, 7, 8,  " Reject ");
+        if (sel == 0) wattroff(w, A_REVERSE);
+
+        if (sel == 1) wattron(w, A_REVERSE);
+        mvwprintw(w, 7, 32, " Accept ");
+        if (sel == 1) wattroff(w, A_REVERSE);
+
+        wrefresh(w);
+
+        int ch = wgetch(w);
+        switch (ch) {
+            case KEY_LEFT:  case KEY_UP:    sel = 0; break;
+            case KEY_RIGHT: case KEY_DOWN:  sel = 1; break;
+            case '\t':                      sel ^= 1; break;
+            case '\n': case '\r':           goto done;
+            case 'y': case 'Y':             sel = 1; goto done;
+            case 'n': case 'N':             sel = 0; goto done;
+        }
+    }
+done:
+    delwin(w);
+    clear();
+    refresh();
+    return sel; /* 1 = accept, 0 = reject */
+}
+
 /* ── waiting screen ─────────────────────────────────────── */
 
 void tui_waiting(int port) {

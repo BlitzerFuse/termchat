@@ -4,7 +4,7 @@
 #define MAX_NAME 32
 #define MAX_MSG  512
 
-typedef enum { MSG } MsgType;
+typedef enum { MSG, CONN_REQUEST, CONN_ACCEPT, CONN_REJECT } MsgType;
 
 typedef struct {
     MsgType type;

@@ -8,7 +8,6 @@
 #include <signal.h>
 #include <pthread.h>
 
-/* password charset: A-Z + 0-9 */
 static const char PASS_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 #define PASS_LEN 6
 
@@ -16,7 +15,6 @@ static WINDOW *msg_win;
 static WINDOW *input_win;
 static char    prompt[MAX_NAME + 8];
 
-/* Set by SIGWINCH; checked in tui_get_input() to break the chat loop. */
 static volatile sig_atomic_t g_resized = 0;
 
 static void handle_sigwinch(int sig) {
@@ -28,18 +26,16 @@ int tui_was_resized(void) {
     return g_resized;
 }
 
-/* Thread entry point: run discovery_respond with a nickname string. */
 static void *tui_menu_disc_thread(void *arg) {
     discovery_respond((const char *)arg);
     return NULL;
 }
 
-/* Scan thread: runs discover_peers in background so ncurses stays alive. */
 typedef struct {
     Peer        peers[MAX_PEERS];
     int         count;
     const char *nickname;
-    int         done;  /* set to 1 when finished */
+    int         done; 
 } ScanArgs;
 
 static void *scan_thread(void *arg) {
@@ -48,8 +44,6 @@ static void *scan_thread(void *arg) {
     s->done  = 1;
     return NULL;
 }
-
-/* ── helpers ─────────────────────────────────────────────── */
 
 static void get_local_ip(char *buf, size_t len) {
     strncpy(buf, "unavailable", len - 1);
@@ -65,7 +59,7 @@ static void get_local_ip(char *buf, size_t len) {
 }
 
 static void ncurses_start(void) {
-    if (stdscr) return;   /* already running */
+    if (stdscr) return;
     initscr();
     cbreak();
     noecho();
@@ -74,13 +68,8 @@ static void ncurses_start(void) {
     signal(SIGWINCH, handle_sigwinch);
 }
 
-/* ── startup menu ────────────────────────────────────────── */
-
-/* Draw the discover peer list inside the menu box.
-   selected is the highlighted index (-1 = none). */
 static void draw_peer_list(WINDOW *w, Peer *peers, int count,
                             int sel, int scanning) {
-    /* clear the peer area (rows 10-) */
     for (int r = 10; r < 18; r++) {
         wmove(w, r, 1);
         wclrtoeol(w);
@@ -108,7 +97,6 @@ int tui_menu(MenuResult *out) {
     char local_ip[64];
     get_local_ip(local_ip, sizeof(local_ip));
 
-    /* Box is taller now to fit peer list: 22 rows */
     const int bw = 56, bh = 22;
     int bx = (COLS - bw) / 2, by = (LINES - bh) / 2;
     if (by < 0) by = 0;
@@ -117,10 +105,9 @@ int tui_menu(MenuResult *out) {
     WINDOW *w = newwin(bh, bw, by, bx);
     keypad(w, TRUE);
 
-    /* draw static chrome */
     werase(w);
     box(w, 0, 0);
-    mvwprintw(w, 1, (bw - 8) / 2, "termchat");
+    mvwprintw(w, 1, (bw - 8) / 2, "Term-chan");
     mvwhline(w, 2, 1, ACS_HLINE, bw - 2);
     mvwprintw(w, 3, 2, "Your IP : %s", local_ip);
     mvwprintw(w, 4, 2, "Port    : 5000");
@@ -128,14 +115,12 @@ int tui_menu(MenuResult *out) {
     mvwprintw(w, 6, 2, "Nickname: ");
     wrefresh(w);
 
-    /* nickname */
     echo(); curs_set(1);
     wmove(w, 6, 12);
     wgetnstr(w, out->nickname, MAX_NAME - 1);
     noecho(); curs_set(0);
     if (!out->nickname[0]) goto abort;
 
-    /* mode selection */
     mvwhline(w, 7, 1, ACS_HLINE, bw - 2);
     mvwprintw(w, 8, 2, "Mode (arrows + Enter):");
 
@@ -163,11 +148,10 @@ mode_done:
     out->mode = (mode_sel == 0) ? MODE_LISTEN : MODE_CONNECT;
 
     if (out->mode == MODE_LISTEN) {
-        /* ── password setup ── */
         mvwhline(w, 10, 1, ACS_HLINE, bw - 2);
         mvwprintw(w, 11, 2, "Password protect this session?");
 
-        int pw_sel = 0; /* 0=None, 1=Auto, 2=Custom */
+        int pw_sel = 0;
         while (1) {
             if (pw_sel == 0) wattron(w, A_REVERSE);
             mvwprintw(w, 12, 4, " None  ");
@@ -192,9 +176,8 @@ mode_done:
         }
 pw_done:
         if (pw_sel == 0) {
-            out->password[0] = '\0'; /* no password */
+            out->password[0] = '\0';
         } else if (pw_sel == 1) {
-            /* auto-generate */
             srand((unsigned)time(NULL));
             for (int i = 0; i < PASS_LEN; i++)
                 out->password[i] = PASS_CHARS[rand() % (sizeof(PASS_CHARS) - 1)];
@@ -204,14 +187,12 @@ pw_done:
             wrefresh(w);
             wgetch(w);
         } else {
-            /* manual entry */
             mvwprintw(w, 13, 2, "Enter password (6 chars, A-Z 0-9): ");
             echo(); curs_set(1);
             wmove(w, 13, 38);
             char tmp[MAX_PASS] = {0};
             wgetnstr(w, tmp, PASS_LEN);
             noecho(); curs_set(0);
-            /* force uppercase */
             for (int i = 0; tmp[i]; i++)
                 out->password[i] = (tmp[i] >= 'a' && tmp[i] <= 'z')
                                    ? tmp[i] - 32 : tmp[i];
@@ -219,7 +200,6 @@ pw_done:
             if (!out->password[0]) out->password[0] = '\0';
         }
 
-        /* Start the discovery responder */
         pthread_t disc_tid;
         pthread_create(&disc_tid, NULL,
                        tui_menu_disc_thread, out->nickname);
@@ -229,26 +209,23 @@ pw_done:
     if (out->mode == MODE_CONNECT) {
         mvwhline(w, 10, 1, ACS_HLINE, bw - 2);
 
-        /* run scan in a thread so ncurses stays responsive */
         ScanArgs scan = { .nickname = out->nickname, .done = 0, .count = 0 };
         pthread_t scan_tid;
         pthread_create(&scan_tid, NULL, scan_thread, &scan);
 
-        /* animated spinner while waiting */
         const char *frames[] = { "Scanning   ", "Scanning.  ", "Scanning.. ", "Scanning..." };
         int frame = 0;
-        wtimeout(w, 120); /* non-blocking wgetch every ~120ms */
+        wtimeout(w, 120); 
         while (!scan.done) {
             mvwprintw(w, 10, 2, "%s", frames[frame++ % 4]);
             wrefresh(w);
-            wgetch(w); /* drives the event loop; returns ERR on timeout */
+            wgetch(w);
         }
-        wtimeout(w, -1); /* restore blocking mode */
+        wtimeout(w, -1);
         pthread_join(scan_tid, NULL);
 
         draw_peer_list(w, scan.peers, scan.count, 0, 0);
 
-        /* separator: "--- or type IP manually ---" spanning full inner width */
         mvwhline(w, 18, 1, ACS_HLINE, bw - 2);
         const char *label = " or type IP manually ";
         int label_col = (bw - (int)strlen(label)) / 2;
@@ -257,7 +234,6 @@ pw_done:
         wrefresh(w);
 
         int peer_sel = 0;
-        /* if peers found, let user navigate list first */
         while (scan.count > 0) {
             draw_peer_list(w, scan.peers, scan.count, peer_sel, 0);
             wrefresh(w);
@@ -282,7 +258,6 @@ pw_done:
         }
 
 manual_ip:
-        /* manual IP entry */
         wmove(w, 19, 12);
         echo(); curs_set(1);
         wgetnstr(w, out->peer_ip, (int)sizeof(out->peer_ip) - 1);
@@ -292,7 +267,6 @@ manual_ip:
 
 connect_done:
     delwin(w);
-    /* intentionally do NOT call endwin() — leave ncurses running */
     return 0;
 
 abort:
@@ -300,8 +274,6 @@ abort:
     endwin();
     return -1;
 }
-
-/* ── password entry screen (connector side) ─────────────── */
 
 const char *tui_enter_password(const char *peer_nick, const char *peer_ip) {
     static char entered[MAX_PASS];
@@ -334,7 +306,6 @@ const char *tui_enter_password(const char *peer_nick, const char *peer_ip) {
     wgetnstr(w, entered, PASS_LEN);
     noecho(); curs_set(0);
 
-    /* force uppercase */
     for (int i = 0; entered[i]; i++)
         if (entered[i] >= 'a' && entered[i] <= 'z') entered[i] -= 32;
 
@@ -343,8 +314,6 @@ const char *tui_enter_password(const char *peer_nick, const char *peer_ip) {
     refresh();
     return entered;
 }
-
-/* ── accept / reject screen ─────────────────────────────── */
 
 int tui_accept_request(const char *peer_nick, const char *peer_ip) {
     clear();
@@ -359,7 +328,7 @@ int tui_accept_request(const char *peer_nick, const char *peer_ip) {
     WINDOW *w = newwin(bh, bw, by, bx);
     keypad(w, TRUE);
 
-    int sel = 1; /* default to Accept */
+    int sel = 1; 
 
     while (1) {
         werase(w);
@@ -398,8 +367,6 @@ done:
     return sel; /* 1 = accept, 0 = reject */
 }
 
-/* ── waiting screen ─────────────────────────────────────── */
-
 void tui_waiting(int port, const char *password) {
     clear();
     int cy = LINES / 2;
@@ -408,19 +375,16 @@ void tui_waiting(int port, const char *password) {
 
     const int w = 38;
 
-    /* top border */
     mvaddch(cy - 1, cx,         ACS_ULCORNER);
     mvhline(cy - 1, cx + 1,     ACS_HLINE, w);
     mvaddch(cy - 1, cx + w + 1, ACS_URCORNER);
 
-    /* row 1: port */
     mvaddch(cy, cx,         ACS_VLINE);
     char line1[40];
     snprintf(line1, sizeof(line1), "  Waiting for connection on port %-4d", port);
     mvprintw(cy, cx + 1, "%-*s", w, line1);
     mvaddch(cy, cx + w + 1, ACS_VLINE);
 
-    /* row 2: password or no-password hint */
     mvaddch(cy + 1, cx, ACS_VLINE);
     if (password && password[0]) {
         char pw_line[40];
@@ -431,20 +395,16 @@ void tui_waiting(int port, const char *password) {
     }
     mvaddch(cy + 1, cx + w + 1, ACS_VLINE);
 
-    /* row 3: cancel hint */
     mvaddch(cy + 2, cx,         ACS_VLINE);
     mvprintw(cy + 2, cx + 1, "%-*s", w, "  Press Ctrl-C to cancel");
     mvaddch(cy + 2, cx + w + 1, ACS_VLINE);
 
-    /* bottom border */
     mvaddch(cy + 3, cx,         ACS_LLCORNER);
     mvhline(cy + 3, cx + 1,     ACS_HLINE, w);
     mvaddch(cy + 3, cx + w + 1, ACS_LRCORNER);
 
     refresh();
 }
-
-/* ── chat TUI ────────────────────────────────────────────── */
 
 static void draw_input_bar(void) {
     mvwhline(input_win, 0, 0, ACS_HLINE, COLS);

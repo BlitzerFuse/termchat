@@ -29,7 +29,6 @@ else
   install_pkg libncurses-dev 2>/dev/null || install_pkg ncurses-devel
 fi
 
-# inetutils provides `hostname -i`; already present on Fedora/RHEL
 if command -v pacman &>/dev/null; then
   install_pkg inetutils
 elif command -v apt &>/dev/null; then

@@ -8,9 +8,9 @@
 #include <stdlib.h>
 
 typedef struct {
-    int          socket_fd;
-    void       (*display_cb)(Packet *);
-    atomic_int   running;
+    int socket_fd;
+    void (*display_cb)(Packet *);
+    atomic_int running;
 } RecvArgs;
 
 static void *recv_thread(void *arg) {
@@ -59,12 +59,12 @@ void start_chat(int socket_fd, char *nickname, void (*display_cb)(Packet *)) {
             continue;
         }
 
-        Packet out = { .type = MSG };
-        strncpy(out.sender,  nickname, MAX_NAME - 1);
-        strncpy(out.content, input,    MAX_MSG  - 1);
+        Packet out = {.type =MSG};
+        strncpy(out.sender, nickname, MAX_NAME-1);
+        strncpy(out.content, input, MAX_MSG-1);
         free(input);
 
-        if (send(socket_fd, &out, sizeof(Packet), 0) <= 0) {
+        if(send(socket_fd, &out, sizeof(Packet), 0) <= 0) {
             tui_status("Send failed — connection lost.");
             break;
         }

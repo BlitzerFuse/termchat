@@ -1,4 +1,5 @@
 #include "chat.h"
+#include "commands.h"
 #include "tui.h"
 #include <pthread.h>
 #include <stdatomic.h>
@@ -43,28 +44,18 @@ void start_chat(int socket_fd, char *nickname, void (*display_cb)(Packet *)) {
         if (input[0] == '\0') { free(input); continue; }
 
         if (input[0] == '/') {
-            if (strcmp(input, "/quit") == 0) {
-                free(input);
-                break;
-            } else if (strncmp(input, "/nick ", 6) == 0) {
-                strncpy(nickname, input + 6, MAX_NAME - 1);
-                nickname[MAX_NAME - 1] = '\0';
-                tui_status("Nickname changed to %s", nickname);
-            } else if (strcmp(input, "/help") == 0) {
-                tui_status("/quit  /nick <name>  /help");
-            } else {
-                tui_status("Unknown command. Type /help.");
-            }
+            CmdResult r = cmd_dispatch(input, nickname, socket_fd);
             free(input);
+            if (r == CMD_QUIT) break;
             continue;
         }
 
-        Packet out = {.type =MSG};
-        strncpy(out.sender, nickname, MAX_NAME-1);
-        strncpy(out.content, input, MAX_MSG-1);
+        Packet out = { .type = MSG };
+        strncpy(out.sender,  nickname, MAX_NAME - 1);
+        strncpy(out.content, input,    MAX_MSG  - 1);
         free(input);
 
-        if(send(socket_fd, &out, sizeof(Packet), 0) <= 0) {
+        if (send(socket_fd, &out, sizeof(Packet), 0) <= 0) {
             tui_status("Send failed — connection lost.");
             break;
         }

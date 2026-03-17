@@ -50,24 +50,37 @@ int main(void) {
         close(listener);
 
     } else {
-        /* Prompt for password — connector always enters one;
-           if the listener has no password set, an empty string is fine */
-        const char *entered_pass = tui_enter_password(
-            menu.peer_ip[0] ? menu.peer_ip : "peer", menu.peer_ip);
+        /* Connector: retry loop so user doesn't have to relaunch on failure */
+        while (1) {
+            const char *entered_pass = tui_enter_password(
+                menu.peer_ip[0] ? menu.peer_ip : "peer", menu.peer_ip);
 
-        sock_fd = connect_to_peer(menu.peer_ip, DEFAULT_PORT,
-                                  menu.nickname, entered_pass);
-        if (sock_fd == -3) {
-            endwin();
-            fprintf(stderr, "Wrong password.\n");
-            return 1;
+            sock_fd = connect_to_peer(menu.peer_ip, DEFAULT_PORT,
+                                      menu.nickname, entered_pass);
+            if (sock_fd == NET_ERR_WRONGPASS) {
+                /* Show error inline in a small popup, then retry */
+                clear();
+                int cy = LINES / 2, cx = (COLS - 36) / 2;
+                if (cx < 0) cx = 0;
+                mvprintw(cy,     cx, "  Wrong password. Press any key to retry.");
+                mvprintw(cy + 1, cx, "  (or Ctrl-C to quit)");
+                refresh();
+                getch();
+                continue;
+            }
+            if (sock_fd == NET_ERR_REJECTED) {
+                clear();
+                int cy = LINES / 2, cx = (COLS - 36) / 2;
+                if (cx < 0) cx = 0;
+                mvprintw(cy,     cx, "  Connection rejected. Press any key to retry.");
+                mvprintw(cy + 1, cx, "  (or Ctrl-C to quit)");
+                refresh();
+                getch();
+                continue;
+            }
+            if (sock_fd < 0) { endwin(); return 1; }
+            break;
         }
-        if (sock_fd == -2) {
-            endwin();
-            fprintf(stderr, "Connection was rejected by the peer.\n");
-            return 1;
-        }
-        if (sock_fd < 0) { endwin(); return 1; }
     }
 
     tui_init(menu.nickname);

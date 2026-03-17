@@ -35,12 +35,21 @@ int accept_connection(int listener_fd, char *peer_ip, char *peer_nick, char *pee
     if (conn < 0) { perror("accept"); return -1; }
     if (peer_ip) strncpy(peer_ip, inet_ntoa(addr.sin_addr), 63);
 
+    /* Timeout: don't block forever if client connects but sends nothing */
+    struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
+    setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     /* Wait for the CONN_REQUEST handshake packet */
     Packet p;
     if (recv(conn, &p, sizeof(Packet), 0) <= 0 || p.type != CONN_REQUEST) {
         close(conn);
         return -1;
     }
+
+    /* Clear the timeout for normal chat use */
+    tv.tv_sec = 0;
+    setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
     if (peer_nick) strncpy(peer_nick, p.sender,   MAX_NAME - 1);
     if (peer_pass) strncpy(peer_pass, p.password, MAX_PASS - 1);
 
@@ -93,9 +102,9 @@ int connect_to_peer(const char *ip, int port, const char *my_nickname, const cha
     if (recv(sock, &resp, sizeof(Packet), 0) <= 0) {
         close(sock); return -1;
     }
-    if (resp.type == CONN_WRONG_PASS) { close(sock); return -3; }
-    if (resp.type == CONN_REJECT)     { close(sock); return -2; }
-    if (resp.type != CONN_ACCEPT)     { close(sock); return -1; }
+    if (resp.type == CONN_WRONG_PASS) { close(sock); return NET_ERR_WRONGPASS; }
+    if (resp.type == CONN_REJECT)     { close(sock); return NET_ERR_REJECTED; }
+    if (resp.type != CONN_ACCEPT)     { close(sock); return NET_ERR_GENERIC; }
 
     return sock;
 }

@@ -345,7 +345,7 @@ const char *tui_enter_password(const char *peer_nick, const char *peer_ip) {
     werase(w); box(w, 0, 0);
     mvwprintw(w, 1, (bw-22)/2, "Password Required");
     mvwhline(w, 2, 1, ACS_HLINE, bw-2);
-    mvwprintw(w, 3, 2, "User : %s", peer_nick);
+    mvwprintw(w, 3, 2, "Host : %s", peer_nick);
     mvwprintw(w, 4, 2, "IP   : %s", peer_ip);
     mvwhline(w, 5, 1, ACS_HLINE, bw-2);
     mvwprintw(w, 6, 2, "Password: ");

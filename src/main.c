@@ -68,6 +68,7 @@ int main(int argc, char *argv[]) {
         int listener = init_listener(port);
         if (listener < 0) { endwin(); return 1; }
 
+        endwin();
         firewall_open(port, disc_port);
 
         if (tui_lobby(&s, listener, menu.password[0] ? menu.password : NULL) < 0) {
@@ -89,7 +90,7 @@ int main(int argc, char *argv[]) {
 
         while (1) {
             const char *pass = tui_enter_password(
-                menu.peer_ip[0] ? menu.peer_ip : "peer", menu.peer_ip);
+                menu.peer_ip[0] ? menu.peer_ip : "unknown", menu.peer_ip);
             int fd = connect_to_peer(menu.peer_ip, port,
                                      menu.nickname, pass, host_nick);
             if (fd == NET_ERR_WRONGPASS) {

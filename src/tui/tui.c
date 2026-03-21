@@ -16,7 +16,7 @@ int tui_was_resized(void) {
 }
 
 void ncurses_start(void) {
-    if (stdscr) return;
+    if (stdscr && !isendwin()) return;
     setlocale(LC_ALL, "");
     initscr();
     cbreak();

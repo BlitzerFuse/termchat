@@ -28,7 +28,7 @@ int accept_connection(int listener_fd, char *peer_ip, char *peer_nick, char *pee
     if (conn < 0) { perror("accept"); return -1; }
     if (peer_ip) strncpy(peer_ip, inet_ntoa(addr.sin_addr), 63);
 
-    struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
+    struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
     setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     Packet p;

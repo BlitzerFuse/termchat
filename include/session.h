@@ -12,6 +12,7 @@ typedef struct {
     char my_nick[MAX_NAME];
     char password[MAX_PASS];
     int  is_host;
+    int  listener_fd;
 } Session;
 
 #endif

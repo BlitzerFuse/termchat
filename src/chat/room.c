@@ -64,7 +64,21 @@ void room_nick_for_fd(Session *s, int fd, char *out, size_t len) {
 
 void room_shutdown_all(Session *s) {
     pthread_mutex_lock(&room_mu);
-    for (int i = 0; i < s->count; i++)
+    for (int i = 0; i < s->count; i++) {
         shutdown(s->fds[i], SHUT_RD);
+        close(s->fds[i]);
+    }
+    pthread_mutex_unlock(&room_mu);
+}
+
+void room_rename(Session *s, int fd, const char *new_nick) {
+    pthread_mutex_lock(&room_mu);
+    for (int i = 0; i < s->count; i++) {
+        if (s->fds[i] == fd) {
+            strncpy(s->nicks[i], new_nick, MAX_NAME - 1);
+            s->nicks[i][MAX_NAME - 1] = '\0';
+            break;
+        }
+    }
     pthread_mutex_unlock(&room_mu);
 }

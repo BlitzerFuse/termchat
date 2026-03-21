@@ -78,7 +78,11 @@ int tui_menu(MenuResult *out) {
 
     echo(); curs_set(1);
 
-    char port_str[6] = "5000";
+    char port_str[6];
+    snprintf(port_str, sizeof(port_str), "%d", out->port > 0 ? out->port : 5000);
+    wmove(w, 4, 12);
+    wprintw(w, "%s", port_str);
+    wrefresh(w);
     wmove(w, 4, 12);
     wgetnstr(w, port_str, 5);
     out->port = atoi(port_str);
@@ -258,6 +262,22 @@ void tui_waiting(int port, const char *password) {
     delwin(w);
 }
 
+
+void tui_waiting_for_start_msg(const char *msg) {
+    clear(); refresh();
+    const int bw = 44, bh = 6;
+    int bx = (COLS - bw) / 2, by = (LINES - bh) / 2;
+    if (bx < 0) bx = 0;
+    if (by < 0) by = 0;
+    WINDOW *w = newwin(bh, bw, by, bx);
+    werase(w); box(w, 0, 0);
+    mvwprintw(w, 1, (bw - 10) / 2, "Term-chan");
+    mvwhline(w, 2, 1, ACS_HLINE, bw - 2);
+    mvwprintw(w, 3, 2, "Connected! Waiting for host to start...");
+    mvwprintw(w, 4, 2, "--- %s ---", msg);
+    wrefresh(w);
+    delwin(w);
+}
 void tui_waiting_for_start(void) {
     clear(); refresh();
     const int bw = 40, bh = 5;

@@ -58,6 +58,7 @@ int main(int argc, char *argv[]) {
     int disc_port = menu.discovery_port;
 
     Session s = {0};
+    s.listener_fd = -1;
     strncpy(s.my_nick,  menu.nickname, MAX_NAME - 1);
     strncpy(s.password, menu.password, MAX_PASS - 1);
 
@@ -75,8 +76,9 @@ int main(int argc, char *argv[]) {
             discovery_stop();
             return 0;
         }
-        close(listener);
-        discovery_stop();
+
+        /* Pass listener into session — accept_thread in chat.c keeps it open */
+        s.listener_fd = listener;
 
         Packet start = { .type = CHAT_START };
         room_broadcast(&s, &start, -1);
@@ -109,16 +111,21 @@ int main(int argc, char *argv[]) {
 
         tui_waiting_for_start();
         Packet p;
-        while (recv(s.fds[0], &p, sizeof(Packet), 0) > 0)
+        while (recv(s.fds[0], &p, sizeof(Packet), 0) > 0) {
             if (p.type == CHAT_START) break;
+            if (p.type == PEER_JOIN)
+                tui_waiting_for_start_msg(p.content);
+        }
     }
 
     tui_init(menu.nickname);
     start_chat(&s, tui_display_message);
     tui_shutdown();
 
-    if (s.is_host)
+    if (s.is_host) {
+        discovery_stop();
         firewall_close(port, disc_port);
+    }
 
     return 0;
 }

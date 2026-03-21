@@ -12,6 +12,15 @@
 #include <pthread.h>
 #include <stdlib.h>
 
+static void blog(const char *msg) {
+    FILE *f = fopen("/tmp/tc_beacon.log", "a");
+    if (!f) return;
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    fprintf(f, "[%ld.%03ld] %s\n", t.tv_sec, t.tv_nsec / 1000000, msg);
+    fclose(f);
+}
+
 #define BEACON          "TERMCHAT_BEACON"
 #define BEACON_INTERVAL_MS 500
 #define PEER_TTL_MS     5000
@@ -138,8 +147,9 @@ static void *beacon_thread(void *arg) {
         .sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY, .sin_port = 0
     };
     if (bind(send_sock, (struct sockaddr *)&send_local, sizeof(send_local)) < 0) {
-        close(send_sock); return NULL;
+        blog("FAIL: send_sock bind failed"); close(send_sock); return NULL;
     }
+    blog("OK: send_sock bound");
 
     /* Recv socket: bound to disc_port to receive beacons from other peers. */
     int recv_sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -154,8 +164,9 @@ static void *beacon_thread(void *arg) {
         .sin_port   = htons(disc_port)
     };
     if (bind(recv_sock, (struct sockaddr *)&recv_local, sizeof(recv_local)) < 0) {
-        close(send_sock); close(recv_sock); return NULL;
+        blog("FAIL: recv_sock bind failed"); close(send_sock); close(recv_sock); return NULL;
     }
+    blog("OK: recv_sock bound");
     struct timeval tv = { .tv_sec = 0, .tv_usec = BEACON_INTERVAL_MS * 1000 };
     setsockopt(recv_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -169,7 +180,9 @@ static void *beacon_thread(void *arg) {
     char beacon[128];
     snprintf(beacon, sizeof(beacon), "%s %s", BEACON, a->nickname);
 
+    blog("OK: beacon loop starting");
     while (!a->stop) {
+        blog("SEND beacon");
         sendto(send_sock, beacon, strlen(beacon), 0,
                (struct sockaddr *)&dest, sizeof(dest));
 
@@ -187,9 +200,10 @@ static void *beacon_thread(void *arg) {
         while (*nick == ' ') nick++;
         if (*nick == '\0') continue;
 
-        table_upsert(inet_ntoa(from.sin_addr), nick);
+        blog("RECV peer beacon"); table_upsert(inet_ntoa(from.sin_addr), nick);
     }
 
+    blog("EXIT: beacon_thread exiting");
     close(send_sock);
     close(recv_sock);
     return NULL;

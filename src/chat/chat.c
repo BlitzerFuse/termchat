@@ -95,11 +95,11 @@ static void *accept_thread(void *arg) {
             send_conn_reject(conn);
             continue;
         }
-        if (!tui_accept_request(peer_nick, peer_ip)) {
-            send_conn_reject(conn);
-            continue;
-        }
 
+        /* Auto-accept during live chat: the lobby already gated entry.
+           Calling tui_accept_request() here would invoke ncurses from
+           this background thread while the main thread owns wgetnstr --
+           an instant crash. Password check above is the guard. */
         send_conn_accept(conn, s->my_nick);
         room_add(s, conn, peer_nick);
 

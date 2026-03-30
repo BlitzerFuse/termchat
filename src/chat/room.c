@@ -70,10 +70,9 @@ void room_shutdown_all(Session *s) {
     count = s->count;
     for (int i = 0; i < count; i++)
         fds[i] = s->fds[i];
-    s->count = 0;  /* zero count before releasing lock */
+    s->count = 0; 
     pthread_mutex_unlock(&room_mu);
 
-    /* Close fds outside the lock so we don't block broadcasts */
     for (int i = 0; i < count; i++) {
         shutdown(fds[i], SHUT_RD);
         close(fds[i]);

@@ -1,6 +1,6 @@
 # term-chan
 
-A LAN chat application for the terminal, written in C. No internet, no server, no accounts — just people on the same network.
+A LAN / WiFi chat application for the terminal, written in C. No internet, no server, no accounts — just people on the same network.
 
 ---
 

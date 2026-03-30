@@ -84,7 +84,6 @@ int main(int argc, char *argv[]) {
             return 0;
         }
 
-        /* Pass listener into session — accept_thread in chat.c keeps it open */
         s.listener_fd = listener;
 
         Packet start = { .type = CHAT_START };

@@ -21,7 +21,6 @@ static char *config_path(char *buf, size_t len) {
 }
 
 static void parse_line(Config *cfg, char *line) {
-    /* Strip trailing newline and comments */
     char *hash = strchr(line, '#');
     if (hash) *hash = '\0';
     char *nl = strchr(line, '\n');
@@ -34,12 +33,10 @@ static void parse_line(Config *cfg, char *line) {
     char *key = line;
     char *val = eq + 1;
 
-    /* Trim whitespace from key */
     while (*key == ' ' || *key == '\t') key++;
     char *end = key + strlen(key) - 1;
     while (end > key && (*end == ' ' || *end == '\t')) *end-- = '\0';
 
-    /* Trim whitespace from value */
     while (*val == ' ' || *val == '\t') val++;
     end = val + strlen(val) - 1;
     while (end > val && (*end == ' ' || *end == '\t')) *end-- = '\0';
@@ -60,7 +57,7 @@ int config_load(Config *cfg) {
     if (!config_path(path, sizeof(path))) return -1;
 
     FILE *f = fopen(path, "r");
-    if (!f) return 0;   /* no config file — not an error */
+    if (!f) return 0;
 
     char line[256];
     while (fgets(line, sizeof(line), f))
@@ -74,12 +71,11 @@ int config_save(const Config *cfg) {
     char path[512];
     if (!config_path(path, sizeof(path))) return -1;
 
-    /* Ensure ~/.termchan/ exists */
     const char *home = getenv("HOME");
     if (home) {
         char dir[512];
         snprintf(dir, sizeof(dir), "%s/.termchan", home);
-        mkdir(dir, 0700);   /* no-op if already exists */
+        mkdir(dir, 0700);
     }
 
     FILE *f = fopen(path, "w");

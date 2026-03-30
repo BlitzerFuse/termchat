@@ -26,13 +26,11 @@ static void lobby_section(WINDOW *w, int row, const char *label) {
         mvwprintw(w, row, 2, " %s ", label);
 }
 
-/* Only redraws rows that can change: peer list rows + the section header. */
 static void lobby_draw_peers(WINDOW *w, Session *s) {
     char label[40];
     snprintf(label, sizeof(label), "connected  %d / %d", s->count, MAX_CLIENTS);
     lobby_section(w, 12, label);
 
-    /* Clear all peer rows */
     for (int r = PEER_ROW0; r < PEER_ROW0 + PEER_ROWS; r++) {
         wmove(w, r, 1); wclrtoeol(w);
     }
@@ -53,7 +51,6 @@ static void lobby_draw_peers(WINDOW *w, Session *s) {
     wrefresh(w);
 }
 
-/* Full redraw — called once at startup. */
 static void lobby_draw_all(WINDOW *w, Session *s,
                             const char *password, const char *local_ip,
                             int port) {
@@ -100,13 +97,9 @@ int tui_lobby(Session *s, int listener_fd, const char *password, int port) {
     noecho();
     curs_set(0);
 
-    /* Initial full draw. */
     lobby_draw_all(w, s, password, local_ip, port);
 
     while (1) {
-        /* Non-blocking key check followed by a bounded select().
-           This avoids calling nodelay() (which requires redrawing
-           everything every iteration) while still being responsive. */
         wtimeout(w, 0);
         int ch = wgetch(w);
         wtimeout(w, -1);
@@ -114,7 +107,6 @@ int tui_lobby(Session *s, int listener_fd, const char *password, int port) {
         if (ch == '\n' || ch == '\r') break;
         if (ch == 'q'  || ch == 27)  { delwin(w); endwin(); return -1; }
 
-        /* Wait up to 200ms for a new connection. */
         fd_set rfds;
         struct timeval tv = {0, 200000};
         FD_ZERO(&rfds);
@@ -139,7 +131,6 @@ int tui_lobby(Session *s, int listener_fd, const char *password, int port) {
         }
         if (!tui_accept_request(peer_nick, peer_ip)) {
             send_conn_reject(conn);
-            /* Redraw lobby after the accept dialog closed. */
             lobby_draw_all(w, s, password, local_ip, port);
             continue;
         }
@@ -148,7 +139,6 @@ int tui_lobby(Session *s, int listener_fd, const char *password, int port) {
         room_add(s, conn, peer_nick);
         g_join_times[s->count - 1] = time(NULL);
 
-        /* Send ROSTER_SYNC to the new peer. */
         Packet rsync;
         memset(&rsync, 0, sizeof(rsync));
         rsync.type = ROSTER_SYNC;
@@ -164,7 +154,6 @@ int tui_lobby(Session *s, int listener_fd, const char *password, int port) {
         rsync.content[MAX_MSG - 1] = '\0';
         send(conn, &rsync, sizeof(Packet), 0);
 
-        /* Notify existing peers. */
         Packet join;
         memset(&join, 0, sizeof(join));
         join.type = PEER_JOIN;
@@ -172,8 +161,7 @@ int tui_lobby(Session *s, int listener_fd, const char *password, int port) {
         snprintf(join.content, MAX_MSG - 1, "%s joined the room.", peer_nick);
         room_broadcast(s, &join, conn);
 
-        /* Only redraw the dynamic parts — no full werase(). */
-        lobby_draw_peers(w, s);
+        lobby_draw_all(w, s, password, local_ip, port);
     }
 
     delwin(w);

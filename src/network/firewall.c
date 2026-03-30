@@ -2,19 +2,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* Returns 1 if `cmd` is on PATH, 0 otherwise. */
 static int has_cmd(const char *cmd) {
     char buf[128];
     snprintf(buf, sizeof(buf), "command -v %s >/dev/null 2>&1", cmd);
     return system(buf) == 0;
 }
 
-/* Returns 1 if ufw is active (loaded and enabled). */
 static int ufw_active(void) {
     return system("ufw status 2>/dev/null | grep -q 'Status: active'") == 0;
 }
 
-/* Returns 1 if firewalld is running. */
 static int firewalld_active(void) {
     return system("firewall-cmd --state >/dev/null 2>&1") == 0;
 }

@@ -17,8 +17,6 @@
 #define PEER_TTL_MS     5000
 #define MAX_IFACES      8
 
-/* ---------- peer table -------------------------------------------------- */
-
 typedef struct {
     Peer            p;
     struct timespec last_seen;
@@ -87,14 +85,6 @@ void discovery_reset(void) {
     pthread_mutex_unlock(&g_mu);
 }
 
-/* ---------- network helpers --------------------------------------------- */
-
-/*
- * Collect every non-loopback, UP, broadcast-capable interface.
- * Returns the number of interfaces found (capped at MAX_IFACES).
- * out_bcasts : broadcast address for each interface
- * out_locals : local unicast address for each interface (for bind)
- */
 typedef struct {
     in_addr_t bcast;
     in_addr_t local;
@@ -118,7 +108,6 @@ static int get_all_ifaces(IfaceInfo *out, int max) {
     return count;
 }
 
-/* Returns 1 if addr matches any local interface address (to filter own beacons). */
 static int is_local_addr(in_addr_t addr) {
     struct ifaddrs *ifap, *ifa;
     if (getifaddrs(&ifap) < 0) return 0;
@@ -133,8 +122,6 @@ static int is_local_addr(in_addr_t addr) {
     return 0;
 }
 
-/* ---------- beacon thread ----------------------------------------------- */
-
 typedef struct {
     char         nickname[MAX_NAME];
     int          disc_port;
@@ -147,16 +134,10 @@ static pthread_t    g_beacon_tid;
 static void *beacon_thread(void *arg) {
     BeaconArgs *a = arg;
     int disc_port = a->disc_port;
-
-    /* --- One send socket per interface, each bound to that iface's local
-           address so the kernel routes the broadcast out the right NIC.
-           This is what makes WiFi + LAN work simultaneously.           --- */
     IfaceInfo ifaces[MAX_IFACES];
     int       send_socks[MAX_IFACES];
     int       n_ifaces = 0;
 
-    /* Snapshot interfaces at thread start. Interfaces rarely change
-       at runtime; if they do the user can restart the app. */
     IfaceInfo all[MAX_IFACES];
     int n_all = get_all_ifaces(all, MAX_IFACES);
 
@@ -166,8 +147,6 @@ static void *beacon_thread(void *arg) {
         int bcast = 1;
         setsockopt(s, SOL_SOCKET, SO_BROADCAST, &bcast, sizeof(bcast));
 
-        /* Bind to the interface's local address so the OS sends out
-           the right NIC and we can filter our own echoed beacons. */
         struct sockaddr_in local = {
             .sin_family      = AF_INET,
             .sin_addr.s_addr = all[i].local,
@@ -183,12 +162,9 @@ static void *beacon_thread(void *arg) {
     }
 
     if (n_ifaces == 0) {
-        /* No usable interfaces — nothing to do. */
         return NULL;
     }
 
-    /* --- One shared recv socket, bound to INADDR_ANY, receives beacons
-           from *all* interfaces (LAN and WiFi) in a single recvfrom.  --- */
     int recv_sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (recv_sock < 0) {
         for (int i = 0; i < n_ifaces; i++) close(send_socks[i]);
@@ -212,13 +188,11 @@ static void *beacon_thread(void *arg) {
     struct timeval tv = { .tv_sec = 0, .tv_usec = BEACON_INTERVAL_MS * 1000 };
     setsockopt(recv_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-    /* Pre-build the beacon payload */
     char beacon[128];
     snprintf(beacon, sizeof(beacon), "%s %s", BEACON, a->nickname);
     size_t beacon_len = strlen(beacon);
 
     while (!a->stop) {
-        /* Broadcast on every interface's subnet */
         for (int i = 0; i < n_ifaces; i++) {
             struct sockaddr_in dest = {
                 .sin_family      = AF_INET,
@@ -229,7 +203,6 @@ static void *beacon_thread(void *arg) {
                    (struct sockaddr *)&dest, sizeof(dest));
         }
 
-        /* Receive any incoming beacons */
         char buf[256] = {0};
         struct sockaddr_in from;
         socklen_t flen = sizeof(from);
@@ -251,8 +224,6 @@ static void *beacon_thread(void *arg) {
     for (int i = 0; i < n_ifaces; i++) close(send_socks[i]);
     return NULL;
 }
-
-/* ---------- public API -------------------------------------------------- */
 
 void discovery_start(const char *my_nickname, int port) {
     if (g_beacon) return;

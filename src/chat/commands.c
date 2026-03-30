@@ -13,18 +13,15 @@ static CmdResult handle_quit(const char *args, char *nickname, Session *s) {
 static CmdResult handle_nick(const char *args, char *nickname, Session *s) {
     if (!args || args[0] == '\0') { tui_status("Usage: /nick <n>"); return CMD_OK; }
 
-    /* Build the change packet before overwriting the local nickname */
     Packet p = { .type = NICK_CHANGE };
     strncpy(p.sender,  nickname, MAX_NAME - 1);
     strncpy(p.content, args,     MAX_NAME - 1);
     p.sender[MAX_NAME  - 1] = '\0';
     p.content[MAX_NAME - 1] = '\0';
 
-    /* Update local state */
     strncpy(nickname, args, MAX_NAME - 1);
     nickname[MAX_NAME - 1] = '\0';
 
-    /* Notify all peers */
     room_broadcast(s, &p, -1);
 
     tui_status("Nickname changed to %s", nickname);

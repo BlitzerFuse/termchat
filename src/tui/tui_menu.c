@@ -15,8 +15,6 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-/* ── shared helpers ───────────────────────────────────────────────────────── */
-
 static const char PASS_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 #define PASS_LEN 6
 
@@ -47,19 +45,6 @@ static void draw_section(WINDOW *w, int row, int bw, const char *label) {
         mvwprintw(w, row, 2, " %s ", label);
 }
 
-/* ── field input ──────────────────────────────────────────────────────────────
- *
- * Reads text into buf (NUL-terminated, max bufsz-1 chars) at window position
- * (row, col) with display width maxw.  Works entirely with wgetch + noecho so
- * that KEY_UP/DOWN/TAB/ENTER can break out of the field for section navigation.
- *
- * Never call echo() before this — we handle our own display.
- *
- * Returns:
- *   FIELD_NEXT  — Enter, Down, or Tab  → advance to next section
- *   FIELD_PREV  — Up                   → go back to previous section
- *   FIELD_ABORT — Escape               → quit
- */
 #define FIELD_NEXT  1
 #define FIELD_PREV  2
 #define FIELD_ABORT 3
@@ -71,14 +56,12 @@ static int read_field(WINDOW *w, int row, int col, int maxw,
     curs_set(1);
 
     for (;;) {
-        /* Render field content padded to maxw so stale chars are erased. */
         mvwprintw(w, row, col, "%-*.*s", maxw, maxw, buf);
         wmove(w, row, col + cur);
         wrefresh(w);
 
         int ch = wgetch(w);
         switch (ch) {
-            /* ── navigation out of field ── */
             case '\n': case '\r': case KEY_DOWN: case '\t':
                 curs_set(0);
                 return FIELD_NEXT;
@@ -89,7 +72,6 @@ static int read_field(WINDOW *w, int row, int col, int maxw,
                 curs_set(0);
                 return FIELD_ABORT;
 
-            /* ── in-field editing ── */
             case KEY_BACKSPACE: case 127: case '\b':
                 if (cur > 0) {
                     memmove(buf + cur - 1, buf + cur, (size_t)(len - cur + 1));
@@ -170,7 +152,6 @@ static int read_field(WINDOW *w, int row, int col, int maxw,
 #define MENU_BW 58
 #define MENU_BH 25
 
-/* Field positions */
 #define NICK_ROW  7
 #define NICK_COL  14
 #define NICK_W    38
@@ -179,16 +160,13 @@ static int read_field(WINDOW *w, int row, int col, int maxw,
 #define PORT_COL  14
 #define PORT_W    10
 
-/* Mode buttons (row 12) */
 #define MODE_ROW      12
-#define MODE_CREATE_C 12   /* col of "  create room  " */
-#define MODE_CONN_C   35   /* col of "  connect  "     */
+#define MODE_CREATE_C 12
+#define MODE_CONN_C   35
 
-/* Peer list (MODE_CONNECT) */
 #define PEER_ROWS  6
 #define PEER_ROW0  16
 
-/* Password section (MODE_LISTEN) */
 #define PW_NONE_C   6
 #define PW_AUTO_C   17
 #define PW_MAN_C    37
@@ -205,8 +183,17 @@ static void menu_draw_static(WINDOW *w, int bw) {
     draw_section(w, 10, bw, NULL);
 }
 
+static void clear_rows(WINDOW *w, int from, int to) {
+    int maxx = getmaxx(w);
+    for (int r = from; r <= to; r++) {
+        wmove(w, r, 1);
+        wclrtoeol(w);
+        mvwaddch(w, r, maxx - 1, ACS_VLINE);
+    }
+}
+
 static void peer_list_draw(WINDOW *w, Peer *peers, int count, int sel) {
-    for (int r = 15; r <= 23; r++) { wmove(w, r, 1); wclrtoeol(w); }
+    clear_rows(w, 15, 23);
 
     if (count == 0) {
         mvwprintw(w, PEER_ROW0, 4, "(no peers yet -- waiting for beacons...)");
@@ -233,35 +220,21 @@ int tui_menu(MenuResult *out) {
     if (by < 0) by = 0;
 
     WINDOW *w = newwin(bh, bw, by, bx);
-    /* keypad MUST stay TRUE throughout — enables KEY_UP/DOWN/LEFT/RIGHT etc.
-       noecho MUST stay active — read_field handles its own display. */
     keypad(w, TRUE);
     noecho();
     curs_set(0);
 
     menu_draw_static(w, bw);
-    /* Pre-fill nickname from saved config */
     if (out->nickname[0])
         mvwprintw(w, NICK_ROW, NICK_COL, "%.*s", NICK_W, out->nickname);
-    /* Pre-fill port */
     char port_str[12];
     snprintf(port_str, sizeof(port_str), "%d", out->port > 0 ? out->port : 5000);
     mvwprintw(w, PORT_ROW, PORT_COL, "%s", port_str);
     wrefresh(w);
-
-    /* ── State machine ────────────────────────────────────────────────────── */
-    /* States (in top-to-bottom order):
-     *   0 = NICK field
-     *   1 = PORT field
-     *   2 = MODE selector
-     *   3 = PASSWORD selector  (create room path)
-     *   4 = PEER LIST          (connect path)
-     */
     int state = 0;
 
     while (1) {
 
-        /* ── State 0: nickname ── */
         if (state == 0) {
             wattron(w, A_REVERSE);
             mvwprintw(w, NICK_ROW, NICK_COL - 1, ">");
@@ -270,12 +243,10 @@ int tui_menu(MenuResult *out) {
 
             int r = read_field(w, NICK_ROW, NICK_COL, NICK_W,
                                out->nickname, MAX_NAME);
-            /* Remove the focus marker */
             mvwprintw(w, NICK_ROW, NICK_COL - 1, " ");
 
             if (r == FIELD_ABORT) goto abort;
             if (r == FIELD_PREV)  { /* already at top, stay */ continue; }
-            /* FIELD_NEXT → validate then go to port */
             if (!out->nickname[0]) { state = 0; continue; }
             for (int i = 0; out->nickname[i]; i++)
                 if (out->nickname[i] == ' ') out->nickname[i] = '_';
@@ -283,7 +254,6 @@ int tui_menu(MenuResult *out) {
             continue;
         }
 
-        /* ── State 1: port ── */
         if (state == 1) {
             wattron(w, A_REVERSE);
             mvwprintw(w, PORT_ROW, PORT_COL - 1, ">");
@@ -302,13 +272,11 @@ int tui_menu(MenuResult *out) {
                 snprintf(port_str, sizeof(port_str), "5000");
                 mvwprintw(w, PORT_ROW, PORT_COL, "%-*s", PORT_W, port_str);
             }
-            /* Start discovery now that we have a nick */
             discovery_start(out->nickname, out->discovery_port);
             state = 2;
             continue;
         }
 
-        /* ── State 2: mode selector ── */
         if (state == 2) {
             int mode_sel = (out->mode == MODE_CONNECT) ? 1 : 0;
             while (1) {
@@ -326,18 +294,14 @@ int tui_menu(MenuResult *out) {
                     case KEY_RIGHT: case 'l': mode_sel = 1; break;
                     case '\t':                mode_sel ^= 1; break;
                     case KEY_UP:
-                        /* De-highlight both buttons, go back to port */
                         mvwprintw(w, MODE_ROW, MODE_CREATE_C, "  create room  ");
                         mvwprintw(w, MODE_ROW, MODE_CONN_C,   "  connect  ");
                         state = 1;
                         goto mode_break;
                     case '\n': case '\r': case KEY_DOWN:
                         out->mode = (mode_sel == 0) ? MODE_LISTEN : MODE_CONNECT;
-                        /* Draw lower divider and clear dynamic section */
                         draw_section(w, 14, bw, NULL);
-                        for (int r = 15; r <= 23; r++) {
-                            wmove(w, r, 1); wclrtoeol(w);
-                        }
+                        clear_rows(w, 15, 23);
                         wrefresh(w);
                         state = 3;
                         goto mode_break;
@@ -349,11 +313,9 @@ mode_break:
             continue;
         }
 
-        /* ── State 3: password (create room) or peer list (connect) ── */
         if (state == 3) {
 
             if (out->mode == MODE_LISTEN) {
-                /* ── Password selector ── */
                 mvwprintw(w, 16, 4, "password protect this session?");
                 mvwprintw(w, 23, 4, "left/right  select   enter  confirm   up  back");
                 int pw_sel = 0;
@@ -375,11 +337,7 @@ mode_break:
                         case KEY_RIGHT: case 'l': if (pw_sel < 2) pw_sel++; break;
                         case '\t':      pw_sel = (pw_sel + 1) % 3; break;
                         case KEY_UP:
-                            /* Back to mode selector */
-                            for (int r = 15; r <= 23; r++) {
-                                wmove(w, r, 1); wclrtoeol(w);
-                            }
-                            /* Remove lower divider */
+                            clear_rows(w, 15, 23);
                             mvwhline(w, 14, 1, ' ', bw - 2);
                             mvwaddch(w, 14, 0,      ACS_VLINE);
                             mvwaddch(w, 14, bw - 1, ACS_VLINE);
@@ -406,16 +364,13 @@ pw_chosen:
                     mvwprintw(w, 20, 4, "password: %s  (share this)", out->password);
                     mvwprintw(w, 21, 4, "press enter to continue...");
                     wrefresh(w);
-                    /* Wait for any key */
                     wgetch(w);
                 } else {
-                    /* Manual password input */
                     mvwprintw(w, 20, 4, "enter password (A-Z 0-9, up to 6 chars):");
-                    for (int r = 21; r <= 22; r++) { wmove(w, r, 1); wclrtoeol(w); }
+                    clear_rows(w, 21, 22);
                     wrefresh(w);
                     char tmp[MAX_PASS + 1];
                     memset(tmp, 0, sizeof(tmp));
-                    /* Use read_field — arrows in the pw field go nowhere special */
                     read_field(w, 21, 4, PASS_LEN + 2, tmp, MAX_PASS + 1);
                     for (int i = 0; tmp[i]; i++)
                         out->password[i] = (tmp[i] >= 'a' && tmp[i] <= 'z')
@@ -423,12 +378,10 @@ pw_chosen:
                     out->password[MAX_PASS - 1] = '\0';
                 }
 pw_break:
-                /* fall through to done on next iteration if state == 3 still */
                 if (state == 3) goto connect_done;
                 continue;
 
             } else {
-                /* ── Peer list (MODE_CONNECT) ── */
                 Peer peers[MAX_PEERS];
                 int  count    = 0;
                 int  peer_sel = 0;
@@ -446,11 +399,8 @@ pw_break:
                             if (peer_sel > 0) {
                                 peer_sel--;
                             } else {
-                                /* Already at top of list — go back to mode */
                                 wtimeout(w, -1);
-                                for (int r = 15; r <= 23; r++) {
-                                    wmove(w, r, 1); wclrtoeol(w);
-                                }
+                                clear_rows(w, 15, 23);
                                 mvwhline(w, 14, 1, ' ', bw - 2);
                                 mvwaddch(w, 14, 0,      ACS_VLINE);
                                 mvwaddch(w, 14, bw - 1, ACS_VLINE);
@@ -487,7 +437,7 @@ peer_break:
 
 manual_ip:
                 /* Manual IP entry */
-                for (int r = 15; r <= 23; r++) { wmove(w, r, 1); wclrtoeol(w); }
+                clear_rows(w, 15, 23);
                 draw_section(w, 14, bw, " type IP manually ");
                 mvwprintw(w, 17, 4, "peer ip");
                 wrefresh(w);
@@ -498,7 +448,7 @@ manual_ip:
                 goto connect_done;
             }
         }
-    } /* end while(1) */
+    } 
 
 connect_done:
     delwin(w);
@@ -510,8 +460,6 @@ abort:
     endwin();
     return -1;
 }
-
-/* ── tui_accept_request ───────────────────────────────────────────────────── */
 
 int tui_accept_request(const char *peer_nick, const char *peer_ip) {
     clear(); refresh();
@@ -554,8 +502,6 @@ done:
     return sel;
 }
 
-/* ── tui_enter_password ───────────────────────────────────────────────────── */
-
 const char *tui_enter_password(const char *peer_nick, const char *peer_ip) {
     static char entered[MAX_PASS + 1];
     memset(entered, 0, sizeof(entered));
@@ -583,8 +529,6 @@ const char *tui_enter_password(const char *peer_nick, const char *peer_ip) {
     return entered;
 }
 
-/* ── tui_waiting_run ──────────────────────────────────────────────────────── */
-
 #define WAIT_BW 58
 #define WAIT_BH 26
 #define WP_MAX  (MAX_CLIENTS + 1)
@@ -595,9 +539,7 @@ static void draw_waiting_peers(WINDOW *w,
                                 int  is_host[],
                                 int  is_me[],
                                 int  count) {
-    for (int r = WP_ROW0; r <= WP_ROW0 + WP_MAX - 1; r++) {
-        wmove(w, r, 1); wclrtoeol(w);
-    }
+    clear_rows(w, WP_ROW0, WP_ROW0 + WP_MAX - 1);
     for (int i = 0; i < count && i < WP_MAX; i++) {
         const char *ann = is_host[i] ? "host" : (is_me[i] ? "you" : "");
         mvwprintw(w, WP_ROW0 + i, 4, "%-16.16s  %s", nicks[i], ann);

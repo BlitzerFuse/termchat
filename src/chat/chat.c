@@ -19,7 +19,6 @@ typedef struct {
     atomic_int *running;
 } PeerArgs;
 
-/* Forward declaration so accept_thread can call it */
 static void spawn_peer_thread(Session *s, int fd, void (*cb)(Packet *),
                               atomic_int *running, pthread_t *tid);
 
@@ -50,8 +49,6 @@ static void *peer_recv_thread(void *arg) {
             continue;
         }
 
-        /* ROSTER_SYNC is only meaningful during the pre-chat lobby/waiting
-           phase. Silently drop it if it somehow arrives in live chat. */
         if (p.type == ROSTER_SYNC) continue;
 
         if (a->s->is_host) {
@@ -100,25 +97,18 @@ static void *accept_thread(void *arg) {
             continue;
         }
 
-        /* Auto-accept during live chat: the lobby already gated entry.
-           Calling tui_accept_request() here would invoke ncurses from
-           this background thread while the main thread owns wgetnstr --
-           an instant crash. Password check above is the guard. */
         send_conn_accept(conn, s->my_nick);
         room_add(s, conn, peer_nick);
 
-        /* Send CHAT_START so the new peer enters chat immediately */
         Packet cs = { .type = CHAT_START };
         send(conn, &cs, sizeof(Packet), 0);
 
-        /* Announce to existing peers */
         Packet join = { .type = PEER_JOIN };
         strncpy(join.sender, peer_nick, MAX_NAME - 1);
         snprintf(join.content, MAX_MSG - 1, "%s joined the chat.", peer_nick);
         room_broadcast(s, &join, conn);
         if (a->display_cb) a->display_cb(&join);
 
-        /* Spawn a recv thread for the new peer — reuse running flag */
         pthread_t tid;
         spawn_peer_thread(s, conn, a->display_cb, a->running, &tid);
         pthread_detach(tid);
@@ -147,7 +137,6 @@ void start_chat(Session *s, void (*display_cb)(Packet *)) {
         spawn_peer_thread(s, s->fds[i], display_cb, &running, &tids[n_tids++]);
     }
 
-    /* Host: keep accepting new peers during chat */
     pthread_t accept_tid = 0;
     if (s->is_host && s->listener_fd >= 0) {
         AcceptArgs *aa = malloc(sizeof(AcceptArgs));
@@ -179,7 +168,6 @@ void start_chat(Session *s, void (*display_cb)(Packet *)) {
 
     atomic_store(&running, 0);
 
-    /* Stop accept thread by closing the listener */
     if (accept_tid) {
         if (s->listener_fd >= 0) {
             close(s->listener_fd);

@@ -15,8 +15,8 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+/* FIX L-4: use PASSWORD_LEN from protocol.h instead of magic number 6. */
 static const char PASS_CHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-#define PASS_LEN 6
 
 void tui_get_local_ip(char *buf, size_t len) {
     strncpy(buf, "unavailable", len - 1);
@@ -63,24 +63,23 @@ static int read_field(WINDOW *w, int row, int col, int maxw,
         int ch = wgetch(w);
         switch (ch) {
             case '\n': case '\r': case KEY_DOWN: case '\t':
-                curs_set(0);
-                return FIELD_NEXT;
+                curs_set(0); return FIELD_NEXT;
             case KEY_UP:
-                curs_set(0);
-                return FIELD_PREV;
-            case 27:   /* Escape */
-                curs_set(0);
-                return FIELD_ABORT;
+                curs_set(0); return FIELD_PREV;
+            case 27:
+                curs_set(0); return FIELD_ABORT;
 
             case KEY_BACKSPACE: case 127: case '\b':
                 if (cur > 0) {
-                    memmove(buf + cur - 1, buf + cur, (size_t)(len - cur + 1));
+                    memmove(buf + cur - 1, buf + cur,
+                            (size_t)(len - cur + 1));
                     cur--; len--;
                 }
                 break;
             case KEY_DC:
                 if (cur < len) {
-                    memmove(buf + cur, buf + cur + 1, (size_t)(len - cur));
+                    memmove(buf + cur, buf + cur + 1,
+                            (size_t)(len - cur));
                     len--;
                 }
                 break;
@@ -98,7 +97,8 @@ static int read_field(WINDOW *w, int row, int col, int maxw,
                 break;
             default:
                 if (ch >= 32 && ch <= 126 && len < bufsz - 1) {
-                    memmove(buf + cur + 1, buf + cur, (size_t)(len - cur + 1));
+                    memmove(buf + cur + 1, buf + cur,
+                            (size_t)(len - cur + 1));
                     buf[cur++] = (char)ch;
                     len++;
                 }
@@ -107,48 +107,7 @@ static int read_field(WINDOW *w, int row, int col, int maxw,
     }
 }
 
-/* ── tui_menu ─────────────────────────────────────────────────────────────────
- *
- * Layout (bw=58, bh=25):
- *
- *  row  0  ┌──────────────────────────────────────────────────────┐
- *  row  1  │                                                      │
- *  row  2  │                    term-chan                         │
- *  row  3  │             terminal chat over LAN                  │
- *  row  4  │                                                      │
- *  row  5  ├──────────────────────────────────────────────────────┤
- *  row  6  │                                                      │
- *  row  7  │    nickname  <field, col 14, width 38>               │
- *  row  8  │    port      <field, col 14, width 10>               │
- *  row  9  │                                                      │
- *  row 10  ├──────────────────────────────────────────────────────┤
- *  row 11  │                                                      │
- *  row 12  │        [ create room ]          [ connect ]          │
- *  row 13  │                                                      │
- *  row 14  ├──────────────────────────────────────────────────────┤
- *
- *  Dynamic section below row 14 (MODE_LISTEN):
- *  row 15  │                                                      │
- *  row 16  │    password protect this session?                    │
- *  row 17  │                                                      │
- *  row 18  │    [ none ]   [ auto-generate ]   [ set manually ]   │
- *  row 19  │                                                      │
- *  row 20  │    (result: "password: XXXXXX  (share this)")        │
- *  row 21  │    (result: "press enter to continue...")            │
- *  row 22  │                                                      │
- *  row 23  │                                                      │
- *  row 24  └──────────────────────────────────────────────────────┘
- *
- *  Dynamic section below row 14 (MODE_CONNECT):
- *  row 15  │                                                      │
- *  row 16  │    peer0              192.168.x.x                    │
- *  row 17  │    peer1  ← selected (reversed)                     │
- *  ...       up to 6 peers (rows 16-21)                          │
- *  row 22  │                                                      │
- *  row 23  │    tab  type IP   r  rescan   q  quit                │
- *  row 24  └──────────────────────────────────────────────────────┘
- */
-
+/* ── layout constants ─────────────────────────────────────────────────── */
 #define MENU_BW 58
 #define MENU_BH 25
 
@@ -196,7 +155,8 @@ static void peer_list_draw(WINDOW *w, Peer *peers, int count, int sel) {
     clear_rows(w, 15, 23);
 
     if (count == 0) {
-        mvwprintw(w, PEER_ROW0, 4, "(no peers yet -- waiting for beacons...)");
+        mvwprintw(w, PEER_ROW0, 4,
+                  "(no peers yet -- waiting for beacons...)");
     } else {
         for (int i = 0; i < count && i < PEER_ROWS; i++) {
             if (i == sel) wattron(w, A_REVERSE);
@@ -207,8 +167,9 @@ static void peer_list_draw(WINDOW *w, Peer *peers, int count, int sel) {
         }
     }
     mvwprintw(w, 23, 4,
-              count ? "tab  type IP   r  rescan   up  back   q  quit"
-                    : "r  rescan   tab  type IP   up  back   q  quit");
+              count
+              ? "tab  type IP   r  rescan   up  back   q  quit"
+              : "r  rescan   tab  type IP   up  back   q  quit");
 }
 
 int tui_menu(MenuResult *out) {
@@ -228,13 +189,15 @@ int tui_menu(MenuResult *out) {
     if (out->nickname[0])
         mvwprintw(w, NICK_ROW, NICK_COL, "%.*s", NICK_W, out->nickname);
     char port_str[12];
-    snprintf(port_str, sizeof(port_str), "%d", out->port > 0 ? out->port : 5000);
+    snprintf(port_str, sizeof(port_str), "%d",
+             out->port > 0 ? out->port : 5000);
     mvwprintw(w, PORT_ROW, PORT_COL, "%s", port_str);
     wrefresh(w);
     int state = 0;
 
     while (1) {
 
+        /* ── state 0: nickname field ───────────────────────────────────── */
         if (state == 0) {
             wattron(w, A_REVERSE);
             mvwprintw(w, NICK_ROW, NICK_COL - 1, ">");
@@ -246,7 +209,7 @@ int tui_menu(MenuResult *out) {
             mvwprintw(w, NICK_ROW, NICK_COL - 1, " ");
 
             if (r == FIELD_ABORT) goto abort;
-            if (r == FIELD_PREV)  { /* already at top, stay */ continue; }
+            if (r == FIELD_PREV)  { continue; }   /* already at top */
             if (!out->nickname[0]) { state = 0; continue; }
             for (int i = 0; out->nickname[i]; i++)
                 if (out->nickname[i] == ' ') out->nickname[i] = '_';
@@ -254,6 +217,7 @@ int tui_menu(MenuResult *out) {
             continue;
         }
 
+        /* ── state 1: port field ───────────────────────────────────────── */
         if (state == 1) {
             wattron(w, A_REVERSE);
             mvwprintw(w, PORT_ROW, PORT_COL - 1, ">");
@@ -277,6 +241,7 @@ int tui_menu(MenuResult *out) {
             continue;
         }
 
+        /* ── state 2: mode selection (create room / connect) ──────────── */
         if (state == 2) {
             int mode_sel = (out->mode == MODE_CONNECT) ? 1 : 0;
             while (1) {
@@ -294,12 +259,15 @@ int tui_menu(MenuResult *out) {
                     case KEY_RIGHT: case 'l': mode_sel = 1; break;
                     case '\t':                mode_sel ^= 1; break;
                     case KEY_UP:
-                        mvwprintw(w, MODE_ROW, MODE_CREATE_C, "  create room  ");
-                        mvwprintw(w, MODE_ROW, MODE_CONN_C,   "  connect  ");
+                        mvwprintw(w, MODE_ROW, MODE_CREATE_C,
+                                  "  create room  ");
+                        mvwprintw(w, MODE_ROW, MODE_CONN_C,
+                                  "  connect  ");
                         state = 1;
                         goto mode_break;
                     case '\n': case '\r': case KEY_DOWN:
-                        out->mode = (mode_sel == 0) ? MODE_LISTEN : MODE_CONNECT;
+                        out->mode = (mode_sel == 0)
+                                    ? MODE_LISTEN : MODE_CONNECT;
                         draw_section(w, 14, bw, NULL);
                         clear_rows(w, 15, 23);
                         wrefresh(w);
@@ -313,29 +281,40 @@ mode_break:
             continue;
         }
 
+        /* ── state 3: password (host) or peer list (connect) ──────────── */
         if (state == 3) {
 
+            /* ── HOST: password selection ─────────────────────────────── */
             if (out->mode == MODE_LISTEN) {
                 mvwprintw(w, 16, 4, "password protect this session?");
-                mvwprintw(w, 23, 4, "left/right  select   enter  confirm   up  back");
+                mvwprintw(w, 23, 4,
+                          "left/right  select   enter  confirm   up  back");
                 int pw_sel = 0;
                 while (1) {
                     if (pw_sel == 0) wattron(w, A_REVERSE);
                     mvwprintw(w, PW_BTN_ROW, PW_NONE_C, "[ none ]");
                     if (pw_sel == 0) wattroff(w, A_REVERSE);
                     if (pw_sel == 1) wattron(w, A_REVERSE);
-                    mvwprintw(w, PW_BTN_ROW, PW_AUTO_C, "[ auto-generate ]");
+                    mvwprintw(w, PW_BTN_ROW, PW_AUTO_C,
+                              "[ auto-generate ]");
                     if (pw_sel == 1) wattroff(w, A_REVERSE);
                     if (pw_sel == 2) wattron(w, A_REVERSE);
-                    mvwprintw(w, PW_BTN_ROW, PW_MAN_C, "[ set manually ]");
+                    mvwprintw(w, PW_BTN_ROW, PW_MAN_C,
+                              "[ set manually ]");
                     if (pw_sel == 2) wattroff(w, A_REVERSE);
                     wrefresh(w);
 
                     int ch = wgetch(w);
                     switch (ch) {
-                        case KEY_LEFT:  case 'h': if (pw_sel > 0) pw_sel--; break;
-                        case KEY_RIGHT: case 'l': if (pw_sel < 2) pw_sel++; break;
-                        case '\t':      pw_sel = (pw_sel + 1) % 3; break;
+                        case KEY_LEFT:  case 'h':
+                            if (pw_sel > 0) pw_sel--;
+                            break;
+                        case KEY_RIGHT: case 'l':
+                            if (pw_sel < 2) pw_sel++;
+                            break;
+                        case '\t':
+                            pw_sel = (pw_sel + 1) % 3;
+                            break;
                         case KEY_UP:
                             clear_rows(w, 15, 23);
                             mvwhline(w, 14, 1, ' ', bw - 2);
@@ -353,34 +332,47 @@ pw_chosen:
                 if (pw_sel == 0) {
                     out->password[0] = '\0';
                 } else if (pw_sel == 1) {
-                    unsigned char rnd[PASS_LEN];
-                    if (getrandom(rnd, sizeof(rnd), 0) != (ssize_t)sizeof(rnd)) {
+                    /* FIX L-4: use PASSWORD_LEN constant. */
+                    unsigned char rnd[PASSWORD_LEN];
+                    if (getrandom(rnd, sizeof(rnd), 0) !=
+                            (ssize_t)sizeof(rnd)) {
                         FILE *uf = fopen("/dev/urandom", "rb");
-                        if (uf) { (void)fread(rnd, 1, sizeof(rnd), uf); fclose(uf); }
+                        if (uf) {
+                            (void)fread(rnd, 1, sizeof(rnd), uf);
+                            fclose(uf);
+                        }
                     }
-                    for (int i = 0; i < PASS_LEN; i++)
-                        out->password[i] = PASS_CHARS[rnd[i] % (sizeof(PASS_CHARS) - 1)];
-                    out->password[PASS_LEN] = '\0';
-                    mvwprintw(w, 20, 4, "password: %s  (share this)", out->password);
+                    for (int i = 0; i < PASSWORD_LEN; i++)
+                        out->password[i] = PASS_CHARS[
+                            rnd[i] % (sizeof(PASS_CHARS) - 1)];
+                    out->password[PASSWORD_LEN] = '\0';
+                    mvwprintw(w, 20, 4, "password: %s  (share this)",
+                              out->password);
                     mvwprintw(w, 21, 4, "press enter to continue...");
                     wrefresh(w);
                     wgetch(w);
                 } else {
-                    mvwprintw(w, 20, 4, "enter password (A-Z 0-9, up to 6 chars):");
+                    /* FIX L-4: use PASSWORD_LEN constant. */
+                    mvwprintw(w, 20, 4,
+                              "enter password (A-Z 0-9, up to %d chars):",
+                              PASSWORD_LEN);
                     clear_rows(w, 21, 22);
                     wrefresh(w);
                     char tmp[MAX_PASS + 1];
                     memset(tmp, 0, sizeof(tmp));
-                    read_field(w, 21, 4, PASS_LEN + 2, tmp, MAX_PASS + 1);
+                    read_field(w, 21, 4, PASSWORD_LEN + 2, tmp,
+                               MAX_PASS + 1);
                     for (int i = 0; tmp[i]; i++)
-                        out->password[i] = (tmp[i] >= 'a' && tmp[i] <= 'z')
-                                            ? tmp[i] - 32 : tmp[i];
+                        out->password[i] =
+                            (tmp[i] >= 'a' && tmp[i] <= 'z')
+                            ? tmp[i] - 32 : tmp[i];
                     out->password[MAX_PASS - 1] = '\0';
                 }
 pw_break:
                 if (state == 3) goto connect_done;
                 continue;
 
+            /* ── CONNECT: peer list ───────────────────────────────────── */
             } else {
                 Peer peers[MAX_PEERS];
                 int  count    = 0;
@@ -389,7 +381,8 @@ pw_break:
                 wtimeout(w, 200);
                 while (1) {
                     count = discovery_peers(peers, MAX_PEERS);
-                    if (peer_sel >= count) peer_sel = count > 0 ? count - 1 : 0;
+                    if (peer_sel >= count)
+                        peer_sel = count > 0 ? count - 1 : 0;
                     peer_list_draw(w, peers, count, peer_sel);
                     wrefresh(w);
 
@@ -413,7 +406,8 @@ pw_break:
                             break;
                         case '\n': case '\r':
                             if (count > 0) {
-                                strncpy(out->peer_ip, peers[peer_sel].ip,
+                                strncpy(out->peer_ip,
+                                        peers[peer_sel].ip,
                                         sizeof(out->peer_ip) - 1);
                                 wtimeout(w, -1);
                                 goto connect_done;
@@ -436,7 +430,13 @@ peer_break:
                 continue;
 
 manual_ip:
-                /* Manual IP entry */
+                /*
+                 * FIX L-5: Escape during manual IP entry now returns to
+                 * the peer list instead of aborting the entire menu.
+                 * Previously the code did `goto abort` on FIELD_ABORT,
+                 * which called discovery_stop() and exited — inconsistent
+                 * with all other field escape behaviours.
+                 */
                 clear_rows(w, 15, 23);
                 draw_section(w, 14, bw, " type IP manually ");
                 mvwprintw(w, 17, 4, "peer ip");
@@ -444,11 +444,23 @@ manual_ip:
                 memset(out->peer_ip, 0, sizeof(out->peer_ip));
                 int r = read_field(w, 17, 14, 40, out->peer_ip,
                                    (int)sizeof(out->peer_ip));
-                if (r == FIELD_ABORT || !out->peer_ip[0]) goto abort;
+                if (r == FIELD_ABORT || !out->peer_ip[0]) {
+                    /*
+                     * FIX L-5: return to peer list rather than aborting.
+                     */
+                    memset(out->peer_ip, 0, sizeof(out->peer_ip));
+                    clear_rows(w, 15, 23);
+                    draw_section(w, 14, bw, NULL);
+                    wrefresh(w);
+                    /* Re-enter state 3 connect (peer list) */
+                    wtimeout(w, 200);
+                    state = 3;
+                    continue;
+                }
                 goto connect_done;
             }
         }
-    } 
+    }
 
 connect_done:
     delwin(w);
@@ -502,9 +514,19 @@ done:
     return sel;
 }
 
-const char *tui_enter_password(const char *peer_nick, const char *peer_ip) {
-    static char entered[MAX_PASS + 1];
-    memset(entered, 0, sizeof(entered));
+/*
+ * FIX M-5: signature changed to accept a caller-provided buffer.
+ *
+ * The original function used 'static char entered[MAX_PASS + 1]' and
+ * returned a pointer to it.  This was not thread-safe and caused the
+ * previous iteration's password to be silently overwritten inside the
+ * retry loop in main.c.  The caller now owns the buffer lifetime.
+ */
+void tui_enter_password(const char *peer_nick, const char *peer_ip,
+                        char *out, size_t out_len) {
+    if (!out || out_len == 0) return;
+    memset(out, 0, out_len);
+
     clear(); refresh();
     const int bw = 50, bh = 9;
     int bx = (COLS - bw) / 2, by = (LINES - bh) / 2;
@@ -520,14 +542,25 @@ const char *tui_enter_password(const char *peer_nick, const char *peer_ip) {
     mvwprintw(w, 3, 4, "host   %s", peer_nick);
     mvwprintw(w, 4, 4, "ip     %s", peer_ip);
     draw_section(w, 5, bw, NULL);
+    /* FIX L-4: use PASSWORD_LEN constant for the display width. */
     mvwprintw(w, 6, 4, "password");
     wrefresh(w);
-    read_field(w, 6, 13, PASS_LEN + 2, entered, MAX_PASS + 1);
-    for (int i = 0; entered[i]; i++)
-        if (entered[i] >= 'a' && entered[i] <= 'z') entered[i] -= 32;
+
+    char tmp[MAX_PASS + 1];
+    memset(tmp, 0, sizeof(tmp));
+    read_field(w, 6, 13, PASSWORD_LEN + 2, tmp, MAX_PASS + 1);
+
+    /* Normalise to upper-case (A-Z 0-9 only, matching host generation). */
+    size_t copy_len = (out_len - 1 < sizeof(tmp) - 1)
+                      ? out_len - 1 : sizeof(tmp) - 1;
+    for (size_t i = 0; i < copy_len && tmp[i]; i++)
+        out[i] = (tmp[i] >= 'a' && tmp[i] <= 'z') ? tmp[i] - 32 : tmp[i];
+    out[copy_len] = '\0';
+
     delwin(w); clear(); refresh();
-    return entered;
 }
+
+/* ── Waiting screen ───────────────────────────────────────────────────── */
 
 #define WAIT_BW 58
 #define WAIT_BH 26
@@ -539,10 +572,16 @@ static void draw_waiting_peers(WINDOW *w,
                                 int  is_host[],
                                 int  is_me[],
                                 int  count) {
-    clear_rows(w, WP_ROW0, WP_ROW0 + WP_MAX - 1);
+    int maxx = getmaxx(w);
+    for (int r = WP_ROW0; r < WP_ROW0 + WP_MAX; r++) {
+        wmove(w, r, 1);
+        wclrtoeol(w);
+        mvwaddch(w, r, maxx - 1, ACS_VLINE);
+    }
     for (int i = 0; i < count && i < WP_MAX; i++) {
         const char *ann = is_host[i] ? "host" : (is_me[i] ? "you" : "");
-        mvwprintw(w, WP_ROW0 + i, 4, "%-16.16s  %s", nicks[i], ann);
+        mvwprintw(w, WP_ROW0 + i, 4,
+                  "%-16.16s  %s", nicks[i], ann);
     }
     wrefresh(w);
 }
@@ -609,6 +648,9 @@ int tui_waiting_run(int sock, const char *host_nick,
             delwin(w); endwin(); return -1;
         }
 
+        /* FIX C-5: validate packet type before dispatch. */
+        if (!PACKET_TYPE_VALID(p.type)) continue;
+
         if (p.type == CHAT_START) {
             delwin(w);
             return 0;
@@ -623,12 +665,15 @@ int tui_waiting_run(int sock, const char *host_nick,
             while (tok && wp_count < WP_MAX) {
                 strncpy(wp_nicks[wp_count], tok, MAX_NAME - 1);
                 wp_nicks[wp_count][MAX_NAME - 1] = '\0';
-                wp_is_host[wp_count] = (strcmp(tok, p.sender) == 0);
-                wp_is_me[wp_count]   = (strcmp(tok, my_nick)  == 0);
+                wp_is_host[wp_count] =
+                    (strcmp(tok, p.sender) == 0);
+                wp_is_me[wp_count] =
+                    (strcmp(tok, my_nick)  == 0);
                 wp_count++;
                 tok = strtok(NULL, "\n");
             }
-            draw_waiting_peers(w, wp_nicks, wp_is_host, wp_is_me, wp_count);
+            draw_waiting_peers(w, wp_nicks, wp_is_host,
+                               wp_is_me, wp_count);
         }
 
         if (p.type == PEER_JOIN && wp_count < WP_MAX) {
@@ -637,7 +682,8 @@ int tui_waiting_run(int sock, const char *host_nick,
             wp_is_host[wp_count] = 0;
             wp_is_me[wp_count]   = 0;
             wp_count++;
-            draw_waiting_peers(w, wp_nicks, wp_is_host, wp_is_me, wp_count);
+            draw_waiting_peers(w, wp_nicks, wp_is_host,
+                               wp_is_me, wp_count);
         }
     }
 }

@@ -49,8 +49,12 @@ fi
 mkdir -p "$BIN_DIR"
 cp "$DIR/termchan" "$BIN_DIR/"
 
-grep -qF 'export PATH="$HOME/bin:$PATH"' ~/.bashrc ||
-  echo 'export PATH="$HOME/bin:$PATH"' >>~/.bashrc
+# FIX L-2: corrected path from "$HOME/bin" to "$HOME/.bin" — the binary
+# is installed into $HOME/.bin (with the dot prefix) so the PATH export
+# must reference the same directory, otherwise 'termchan' is never found
+# after running 'source ~/.bashrc'.
+grep -qF 'export PATH="$HOME/.bin:$PATH"' ~/.bashrc ||
+  echo 'export PATH="$HOME/.bin:$PATH"' >>~/.bashrc
 
 echo ""
 echo "termchan installed. Run: source ~/.bashrc && termchan"

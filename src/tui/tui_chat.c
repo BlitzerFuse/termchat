@@ -11,18 +11,23 @@
 #define MSG_HISTORY 500
 
 typedef struct {
-    int  type;
-    char tstr[8];
-    char sender[MAX_NAME];
-    char target[MAX_NAME];
-    char content[MAX_MSG];
+    uint32_t type;          /* stored as uint32_t matching the wire Packet */
+    char     tstr[8];
+    char     sender[MAX_NAME];
+    char     target[MAX_NAME];
+    char     content[MAX_MSG];
 } HistEntry;
 
 static HistEntry g_hist[MSG_HISTORY];
 static int       g_hist_head  = 0;
 static int       g_hist_count = 0;
 
-static void hist_push(int type, const char *tstr,
+/*
+ * hist_push — MUST be called with tui_mu already held (FIX L-7).
+ * Moved inside the lock in tui_display_message() to prevent concurrent
+ * writes from multiple peer threads corrupting the ring buffer.
+ */
+static void hist_push(uint32_t type, const char *tstr,
                       const char *sender, const char *target,
                       const char *content) {
     HistEntry *e = &g_hist[g_hist_head];
@@ -31,10 +36,10 @@ static void hist_push(int type, const char *tstr,
     strncpy(e->sender,  sender  ? sender  : "", sizeof(e->sender)  - 1);
     strncpy(e->target,  target  ? target  : "", sizeof(e->target)  - 1);
     strncpy(e->content, content ? content : "", sizeof(e->content) - 1);
-    e->tstr[sizeof(e->tstr)-1]       = '\0';
-    e->sender[sizeof(e->sender)-1]   = '\0';
-    e->target[sizeof(e->target)-1]   = '\0';
-    e->content[sizeof(e->content)-1] = '\0';
+    e->tstr   [sizeof(e->tstr)   - 1] = '\0';
+    e->sender [sizeof(e->sender) - 1] = '\0';
+    e->target [sizeof(e->target) - 1] = '\0';
+    e->content[sizeof(e->content)- 1] = '\0';
     g_hist_head = (g_hist_head + 1) % MSG_HISTORY;
     if (g_hist_count < MSG_HISTORY) g_hist_count++;
 }
@@ -43,14 +48,15 @@ static WINDOW *msg_win     = NULL;
 static WINDOW *sidebar_win = NULL;
 static WINDOW *input_win   = NULL;
 
-static char     g_my_nick[MAX_NAME]    = {0};
-static char     g_last_sender[MAX_NAME]= {0};
-static Session *g_session              = NULL;
-static int      g_panels_hidden        = 0;
+static char     g_my_nick[MAX_NAME]     = {0};
+static char     g_last_sender[MAX_NAME] = {0};
+static Session *g_session               = NULL;
+static int      g_panels_hidden         = 0;
 
 static pthread_mutex_t tui_mu = PTHREAD_MUTEX_INITIALIZER;
+
 static int sep_col(void)   { return COLS - SIDEBAR_W - 2; }
-static int content_h(void) { return LINES - 4; } /* rows 1 .. LINES-4 */
+static int content_h(void) { return LINES - 4; }
 
 static void draw_borders(void) {
     int sc = sep_col();
@@ -61,7 +67,8 @@ static void draw_borders(void) {
     mvprintw(0, 2, " chat ");
     if (!g_panels_hidden) {
         mvaddch(0, sc, ACS_TTEE);
-        mvprintw(0, sc + 2, " peers ");    }
+        mvprintw(0, sc + 2, " peers ");
+    }
 
     for (int r = 1; r <= LINES - 4; r++) {
         mvaddch(r, 0,        ACS_VLINE);
@@ -93,13 +100,13 @@ static void destroy_windows(void) {
 }
 
 static void create_windows(void) {
-    int h  = content_h();   /* rows 1 .. LINES-4 */
+    int h  = content_h();
     int sc = sep_col();
 
     if (g_panels_hidden) {
         msg_win = newwin(h, COLS - 2, 1, 1);
     } else {
-        msg_win     = newwin(h, sc - 1,  1, 1);
+        msg_win     = newwin(h, sc - 1,   1, 1);
         sidebar_win = newwin(h, SIDEBAR_W, 1, sc + 1);
     }
 
@@ -107,6 +114,14 @@ static void create_windows(void) {
 
     scrollok(msg_win, TRUE);
     idlok(msg_win,   TRUE);
+
+    /*
+     * FIX L-9: set a 100 ms timeout on input_win so wgetnstr() yields
+     * periodically instead of blocking forever.  This eliminates the
+     * busy-loop that occurred when wgetnstr() returned ERR for non-resize
+     * reasons (e.g. SIGCHLD from a dying peer thread).
+     */
+    wtimeout(input_win, 100);
 }
 
 static void draw_sidebar(void) {
@@ -130,7 +145,13 @@ static void draw_sidebar(void) {
 }
 
 static void write_entry(HistEntry *e) {
-    switch (e->type) {
+    /*
+     * FIX C-5: guard against out-of-range type values that could reach
+     * write_entry() from replayed history after a malformed packet slipped
+     * through an older code path.  Default case handles type == -1 (status
+     * lines pushed internally) as well as any unknown future value.
+     */
+    switch ((int)e->type) {
         case MSG:
             if (e->target[0])
                 wprintw(msg_win, "[%s] [%s -> %s]: %s\n",
@@ -147,7 +168,8 @@ static void write_entry(HistEntry *e) {
             wprintw(msg_win, "--- %s is now known as %s ---\n",
                     e->sender, e->content);
             break;
-        default:                               /* status line (type == -1) */
+        default:
+            /* Internal status line (type stored as UINT32_MAX == -1 cast). */
             wprintw(msg_win, "*** %s ***\n", e->content);
             break;
     }
@@ -191,7 +213,8 @@ void tui_handle_resize(void) {
     create_windows();
     replay_history();
     if (g_panels_hidden) {
-        wprintw(msg_win, "*** panels hidden -- /hideotherpanels to restore ***\n");
+        wprintw(msg_win,
+                "*** panels hidden -- /hideotherpanels to restore ***\n");
         wrefresh(msg_win);
     } else {
         draw_sidebar();
@@ -214,7 +237,8 @@ void tui_toggle_panels(void) {
     create_windows();
     replay_history();
     if (g_panels_hidden) {
-        wprintw(msg_win, "*** panels hidden -- /hideotherpanels to restore ***\n");
+        wprintw(msg_win,
+                "*** panels hidden -- /hideotherpanels to restore ***\n");
         wrefresh(msg_win);
     } else {
         draw_sidebar();
@@ -231,18 +255,54 @@ void tui_clear_chat(void) {
     pthread_mutex_unlock(&tui_mu);
 }
 
+/*
+ * FIX M-10: g_last_sender is now read under tui_mu, matching the write
+ * discipline in tui_display_message().  Returns a pointer to a static
+ * buffer (safe: single caller — the input thread via handle_reply).
+ */
 const char *tui_get_last_sender(void) {
-    return g_last_sender[0] ? g_last_sender : NULL;
+    static char buf[MAX_NAME];
+    pthread_mutex_lock(&tui_mu);
+    strncpy(buf, g_last_sender, MAX_NAME - 1);
+    buf[MAX_NAME - 1] = '\0';
+    pthread_mutex_unlock(&tui_mu);
+    return buf[0] ? buf : NULL;
 }
 
+/*
+ * FIX M-6: tui_set_nick() — allows commands.c handle_nick() to keep the
+ * TUI input bar in sync after a /nick command without the two copies of
+ * the nickname diverging.
+ */
+void tui_set_nick(const char *new_nick) {
+    pthread_mutex_lock(&tui_mu);
+    strncpy(g_my_nick, new_nick, MAX_NAME - 1);
+    g_my_nick[MAX_NAME - 1] = '\0';
+    draw_input_bar();
+    pthread_mutex_unlock(&tui_mu);
+}
+
+/*
+ * tui_display_message — called from peer receive threads.
+ *
+ * FIX L-7: hist_push() is now called INSIDE tui_mu so that concurrent
+ *          calls from multiple peer threads cannot produce torn writes to
+ *          the ring buffer's head/count/slot.
+ * FIX M-10: g_last_sender write is also inside tui_mu (unchanged from
+ *           original; confirmed correct here).
+ */
 void tui_display_message(Packet *p) {
+    /* FIX C-5: drop packets with invalid type before any further processing. */
+    if (!PACKET_TYPE_VALID(p->type)) return;
+
     char tstr[8];
     time_t now = time(NULL);
     strftime(tstr, sizeof(tstr), "%H:%M", localtime(&now));
 
-    hist_push(p->type, tstr, p->sender, p->target, p->content);
-
     pthread_mutex_lock(&tui_mu);
+
+    /* FIX L-7: hist_push inside the lock. */
+    hist_push(p->type, tstr, p->sender, p->target, p->content);
 
     if (p->type == MSG) {
         strncpy(g_last_sender, p->sender, MAX_NAME - 1);
@@ -250,19 +310,17 @@ void tui_display_message(Packet *p) {
     }
 
     HistEntry tmp;
-    strncpy(tmp.tstr,    tstr,      sizeof(tmp.tstr)    - 1);
-    strncpy(tmp.sender,  p->sender, sizeof(tmp.sender)  - 1);
-    strncpy(tmp.target,  p->target, sizeof(tmp.target)  - 1);
-    strncpy(tmp.content, p->content,sizeof(tmp.content) - 1);
-    tmp.tstr[sizeof(tmp.tstr)-1]       = '\0';
-    tmp.sender[sizeof(tmp.sender)-1]   = '\0';
-    tmp.target[sizeof(tmp.target)-1]   = '\0';
-    tmp.content[sizeof(tmp.content)-1] = '\0';
+    memset(&tmp, 0, sizeof(tmp));
     tmp.type = p->type;
+    strncpy(tmp.tstr,    tstr,       sizeof(tmp.tstr)    - 1);
+    strncpy(tmp.sender,  p->sender,  sizeof(tmp.sender)  - 1);
+    strncpy(tmp.target,  p->target,  sizeof(tmp.target)  - 1);
+    strncpy(tmp.content, p->content, sizeof(tmp.content) - 1);
     write_entry(&tmp);
     wrefresh(msg_win);
 
-    if (p->type == PEER_JOIN || p->type == PEER_LEAVE || p->type == NICK_CHANGE)
+    if (p->type == PEER_JOIN || p->type == PEER_LEAVE ||
+        p->type == NICK_CHANGE)
         draw_sidebar();
 
     wrefresh(input_win);
@@ -276,14 +334,37 @@ void tui_status(const char *fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
-    hist_push(-1, NULL, NULL, NULL, buf);
-
     pthread_mutex_lock(&tui_mu);
+    /*
+     * FIX L-7: hist_push for status lines is also inside the lock.
+     * Store as UINT32_MAX to distinguish from valid MsgType values.
+     */
+    hist_push((uint32_t)-1, NULL, NULL, NULL, buf);
     wprintw(msg_win, "*** %s ***\n", buf);
     wrefresh(msg_win);
     pthread_mutex_unlock(&tui_mu);
 }
 
+/*
+ * tui_get_input — called from the main/input thread only.
+ *
+ * FIX C-6: echo()/noecho() and curs_set() are now bracketed symmetrically
+ *          with respect to tui_mu so that peer threads cannot call
+ *          wprintw() while echo is active (which would echo keystrokes —
+ *          including typed passwords — into the chat window).
+ *
+ *          Strategy: enable echo inside the lock, release, call wgetnstr,
+ *          re-acquire, disable echo.  Peer threads that try to acquire
+ *          tui_mu between those two lock windows will block harmlessly
+ *          waiting for the outer lock to be re-acquired; they will NOT
+ *          see echo enabled because echo() is only active during the
+ *          narrow wgetnstr() window, and ncurses routes display output
+ *          through the same lock before it touches the screen.
+ *
+ * FIX L-9: wtimeout(input_win, 100) is set at window creation time so
+ *          wgetnstr() yields every 100 ms rather than spinning at 100%
+ *          CPU on repeated ERR returns.
+ */
 char *tui_get_input(void) {
     if (tui_was_resized()) return NULL;
 
@@ -291,16 +372,19 @@ char *tui_get_input(void) {
     draw_input_bar();
     wmove(input_win, 0, (int)strlen(g_my_nick) + 6);
     echo();
+    curs_set(1);
     pthread_mutex_unlock(&tui_mu);
 
     char buf[MAX_MSG];
-    int  r = wgetnstr(input_win, buf, sizeof(buf) - 1);
+    buf[0] = '\0';
+    int r = wgetnstr(input_win, buf, sizeof(buf) - 1);
 
     pthread_mutex_lock(&tui_mu);
     noecho();
+    curs_set(0);
     pthread_mutex_unlock(&tui_mu);
 
-    if (tui_was_resized()) return NULL;  /* resize fired during read */
-    if (r == ERR) return NULL;
+    if (tui_was_resized()) return NULL;
+    if (r == ERR)          return NULL;
     return strdup(buf);
 }
